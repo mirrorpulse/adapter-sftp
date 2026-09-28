@@ -1,0 +1,11 @@
+[Bb]in/
+[Oo]bj/
+TestResults/
+*.pfx
+*.p12
+*.key
+*.pem
+.env
+.env.*
+.DS_Store
+Thumbs.db
