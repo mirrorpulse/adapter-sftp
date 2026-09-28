@@ -1,14 +1,13 @@
-# MirrorPulse Adapters
+# MirrorPulse SFTP Adapter
 
-This repository template is the starting point for an independently packaged MirrorPulse Adapter Worker.
+This repository contains the independent SFTP Worker process for MirrorPulse. Each configured instance runs in its own process and communicates with the Host through a current-user Named Pipe.
 
-## Layout
+## Build
 
-- `src/` contains reusable Worker SDK code.
-- `samples/` contains a minimal executable Worker.
-- `template/` contains the manifest and `.mpadapter` package skeleton.
-- `eng/` contains repository validation and packaging scripts.
+Run `pwsh ./eng/verify.ps1` to restore and build the Worker for Windows x64 and ARM64. The reusable IPC SDK is under `src/MirrorPulse.Adapter.Sdk/`.
 
-Adapters communicate with MirrorPulse over the current-user Named Pipe contract and receive configuration, credentials references, source-directory grants, and cache paths from MirrorPulse at runtime.
+## Release status
 
-The template does not implement a storage protocol. Provider repositories should add their own protocol code and publish a signed `.mpadapter` release.
+The Worker implementation is under product integration. No signed production `.mpadapter` release has been published from this repository. Release packages will include both architectures, a verified file inventory, and a detached package signature.
+
+Licensed under Apache-2.0. See [LICENSE](LICENSE).
