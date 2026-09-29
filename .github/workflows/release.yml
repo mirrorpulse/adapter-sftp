@@ -107,7 +107,7 @@ jobs:
           $canonical = $inventory | ConvertTo-Json -Compress -Depth 5
           $pfx = [Convert]::FromBase64String($env:MIRRORPULSE_ADAPTER_SIGNING_PFX_BASE64)
           $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx, $env:MIRRORPULSE_ADAPTER_SIGNING_PFX_PASSWORD, [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
-          $rsa = $certificate.GetRSAPrivateKey()
+          $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($certificate)
           if ($null -eq $rsa) { throw 'The signing certificate has no RSA private key.' }
           try {
             $signature = [Convert]::ToBase64String($rsa.SignData([Text.Encoding]::UTF8.GetBytes($canonical), [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1))
