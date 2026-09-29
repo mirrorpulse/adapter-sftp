@@ -102,7 +102,7 @@ jobs:
               $relative = [IO.Path]::GetRelativePath($packageRoot, $_.FullName).Replace('\', '/')
               $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([IO.File]::ReadAllBytes($_.FullName)))
               [ordered]@{ path = $relative; length = $_.Length; sha256 = $hash }
-            } | Sort-Object path
+            } | Sort-Object path -CaseSensitive
           )
           $canonical = $inventory | ConvertTo-Json -Compress -Depth 5
           $pfx = [Convert]::FromBase64String($env:MIRRORPULSE_ADAPTER_SIGNING_PFX_BASE64)
