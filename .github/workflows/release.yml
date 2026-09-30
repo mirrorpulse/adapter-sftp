@@ -113,8 +113,17 @@ jobs:
             $signature = [Convert]::ToBase64String($rsa.SignData([Text.Encoding]::UTF8.GetBytes($canonical), [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1))
           } finally { $rsa.Dispose(); $certificate.Dispose() }
           $signaturePath = "$packagePath.signature.json"
-          [ordered]@{ algorithm = 'RSA-SHA256'; signer = 'MirrorPulse Team'; signature = $signature; files = $inventory } |
-            ConvertTo-Json -Depth 8 | Set-Content $signaturePath -Encoding utf8
+          $signatureEnvelope = [ordered]@{ algorithm = 'RSA-SHA256'; signer = 'MirrorPulse Team'; signature = $signature; files = $inventory } |
+            ConvertTo-Json -Depth 8
+          $signatureEnvelope | Set-Content $signaturePath -Encoding utf8
+          $packageStream = [IO.File]::Open($packagePath, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite)
+          $archive = [IO.Compression.ZipArchive]::new($packageStream, [IO.Compression.ZipArchiveMode]::Update)
+          try {
+            $entry = $archive.CreateEntry('META-INF/mirrorpulse/signature.json', [IO.Compression.CompressionLevel]::Optimal)
+            $entry.LastWriteTime = [DateTimeOffset]::new(1980, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
+            $writer = [IO.StreamWriter]::new($entry.Open(), [Text.UTF8Encoding]::new($false))
+            try { $writer.Write($signatureEnvelope) } finally { $writer.Dispose() }
+          } finally { $archive.Dispose(); $packageStream.Dispose() }
           "package=$packagePath" | Out-File $env:GITHUB_OUTPUT -Append
           "signature=$signaturePath" | Out-File $env:GITHUB_OUTPUT -Append
         id: package
