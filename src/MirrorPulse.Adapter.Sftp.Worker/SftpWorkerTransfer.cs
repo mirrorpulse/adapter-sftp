@@ -111,7 +111,17 @@ public sealed class SftpWorkerTransfer(SftpClient client, SftpWorkerConfiguratio
     {
         if (isDirectory)
         {
-            throw new NotSupportedException("The SFTP Worker does not delete directories through the mutation protocol.");
+            string directory = ResolvePath(relativePath);
+            string? currentDirectory = await GetRevisionAsync(relativePath, cancellationToken)
+                .ConfigureAwait(false);
+            if (currentDirectory is null) return null;
+            if (!string.Equals(currentDirectory, expectedRevision, StringComparison.Ordinal))
+            {
+                throw new SftpRevisionConflictException(expectedRevision, currentDirectory);
+            }
+
+            await DeleteDirectoryRecursiveAsync(directory, cancellationToken).ConfigureAwait(false);
+            return null;
         }
 
         string? current = await GetRevisionAsync(relativePath, cancellationToken).ConfigureAwait(false);
@@ -138,7 +148,25 @@ public sealed class SftpWorkerTransfer(SftpClient client, SftpWorkerConfiguratio
     {
         if (isDirectory)
         {
-            throw new NotSupportedException("The SFTP Worker does not move directories through the mutation protocol.");
+            string source = ResolvePath(sourcePath);
+            string? currentDirectory = await GetRevisionAsync(sourcePath, cancellationToken)
+                .ConfigureAwait(false);
+            if (!string.Equals(currentDirectory, expectedRevision, StringComparison.Ordinal))
+            {
+                throw new SftpRevisionConflictException(expectedRevision, currentDirectory);
+            }
+
+            try
+            {
+                client.RenameFile(source, ResolvePath(destinationPath), isPosix: true);
+            }
+            catch (NotSupportedException)
+            {
+                client.RenameFile(source, ResolvePath(destinationPath));
+            }
+
+            return await GetRevisionAsync(destinationPath, cancellationToken).ConfigureAwait(false)
+                ?? throw new IOException("The moved SFTP directory is missing.");
         }
 
         string? current = await GetRevisionAsync(sourcePath, cancellationToken).ConfigureAwait(false);
@@ -177,6 +205,30 @@ public sealed class SftpWorkerTransfer(SftpClient client, SftpWorkerConfiguratio
 
         string root = configuration.Endpoint.AbsolutePath.TrimEnd('/');
         return root + "/" + string.Join('/', parts);
+    }
+
+    private async Task DeleteDirectoryRecursiveAsync(
+        string directory,
+        CancellationToken cancellationToken)
+    {
+        ISftpFile[] children = client.ListDirectory(directory)
+            .Where(item => item.Name is not "." and not "..")
+            .ToArray();
+        foreach (ISftpFile child in children)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (child.IsDirectory)
+            {
+                await DeleteDirectoryRecursiveAsync(child.FullName, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                await client.DeleteFileAsync(child.FullName, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        await client.DeleteDirectoryAsync(directory, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<SftpWorkerDirectoryPage> ReadDirectoryPageAsync(
