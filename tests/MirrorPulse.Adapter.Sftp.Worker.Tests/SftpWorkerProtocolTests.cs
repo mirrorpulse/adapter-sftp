@@ -23,6 +23,7 @@ public sealed class SftpWorkerProtocolTests
     public async Task TwoSourcesKeepCredentialsNamesVersionsAndRangesBoundToTheirRoots()
     {
         await using var session = await SftpWorkerSession.StartAsync();
+        await File.WriteAllTextAsync(Path.Combine(session.Left.Storage, ".fixture-canonical-parent"), "enabled");
         CollectionAssert.AreEqual(EnabledRoots, session.CredentialRoots);
         Assert.IsEmpty(session.ChallengeRoots);
         foreach (string root in new[] { "left", "right" })

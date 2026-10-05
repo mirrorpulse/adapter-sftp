@@ -44,9 +44,22 @@ class Storage(paramiko.SFTPServerInterface):
 
     def _local(self, path):
         normalized = posixpath.normpath("/" + path).lstrip("/")
+        if os.path.exists(os.path.join(self.root, ".fixture-canonical-parent")):
+            if normalized == "virtual-root":
+                normalized = ""
+            elif normalized.startswith("virtual-root/"):
+                normalized = normalized[len("virtual-root/"):]
         if normalized.startswith("../") or normalized == "..":
             raise OSError(errno.EACCES, "path outside fixture")
         return os.path.join(self.root, *normalized.split("/"))
+
+    def canonicalize(self, path):
+        if not os.path.exists(os.path.join(self.root, ".fixture-canonical-parent")):
+            return super().canonicalize(path)
+        normalized = posixpath.normpath("/" + path).lstrip("/")
+        if normalized == "virtual-root" or normalized.startswith("virtual-root/"):
+            return "/" + normalized
+        return "/virtual-root" + ("/" + normalized if normalized else "")
 
     def stat(self, path):
         try:
@@ -71,6 +84,8 @@ class Storage(paramiko.SFTPServerInterface):
                 return [attributes]
             entries = []
             for name in os.listdir(self._local(path)):
+                if name == ".fixture-canonical-parent":
+                    continue
                 local = os.path.join(self._local(path), name)
                 attributes = paramiko.SFTPAttributes.from_stat(os.lstat(local))
                 attributes.filename = name

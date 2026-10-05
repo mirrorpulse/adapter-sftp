@@ -14,13 +14,19 @@ internal static class SftpOperations
 
     private static async Task<ISftpFile[]> ReadListingAsync(SftpWorkerRoot root, string path, CancellationToken token)
     {
+        ISftpFile directory = await root.Client.GetAsync(path, token).ConfigureAwait(false);
+        if (!directory.IsDirectory || directory.IsSymbolicLink || directory.FullName.Length is < 1 or > 8192)
+            throw new InvalidDataException("DirectoryEnumerationIncomplete");
+        // ListDirectoryAsync uses the server's canonical parent, which can differ
+        // from the requested path. Preserve that exact prefix when checking raw names.
+        string prefix = directory.FullName.EndsWith('/') ? directory.FullName : directory.FullName + '/';
         var items = new List<ISftpFile>();
         await foreach (ISftpFile item in root.Client.ListDirectoryAsync(path, token).ConfigureAwait(false))
         {
             if (item.Name is "." or "..") continue;
             // SSH.NET exposes Name as the last path segment. Check FullName too
             // so a hostile raw directory entry cannot be normalized into an alias.
-            if (item.FullName != path.TrimEnd('/') + "/" + item.Name)
+            if (item.FullName != prefix + item.Name)
                 throw new InvalidDataException("DirectoryEnumerationIncomplete");
             if (items.Count >= 8192 || item.Name.Length is < 1 or > 4096 || item.Name.Contains('/') ||
                 item.Name.Contains('\\') || item.Name.Contains(':') || item.Name.Any(char.IsControl) ||
