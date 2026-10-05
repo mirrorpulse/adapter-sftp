@@ -50,3 +50,20 @@ CI runs the source and signed package profiles on native x64 and ARM64 runners.
 Original TRX and package hash receipts are retained as artifacts. Organization
 signing, production Host acceptance and protected publication remain separate
 release gates.
+
+## Publication
+
+Preview candidates are resolved from `develop` as `X.Y.Z-preview.N`. A manual
+`publish=false` run validates a disposable candidate. Actual preview publication
+requires `publish=true` and the exact `PUBLISH` confirmation. Stable publication
+starts from a reviewed `develop` PR merged into `main`, with one `breaking`,
+`feature` or `fix` classification, and requires the protected `stable` approval.
+
+The controller builds once, signs and freezes the source, version and asset
+hashes, then runs the exact candidate on native x64 and ARM64. It consumes fixed
+SDK 0.2.1 assets and the fixed production Host verifier. The Host profile checks
+independent pinned SSH sources, credentials, CfSharp reads, disabled roots,
+private runtime loading and safe mutation refusal. Safe write capabilities remain
+an open release requirement. Signing keys are supplied only to the protected
+signing job and are never read from private files or exported. Existing assets
+and tags remain immutable.

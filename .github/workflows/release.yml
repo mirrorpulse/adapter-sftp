@@ -1,137 +1,208 @@
 name: Signed Adapter Release
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
-      version:
-        description: Canonical numeric version without the v prefix
-        required: true
-        default: 0.1.0
+      channel:
+        description: Preview from develop; stable dry run from main
+        type: choice
+        options: [Preview, Stable]
+        default: Preview
       publish:
-        description: Publish a Release after signing; false only uploads verified artifacts
+        description: Publish a verified candidate through the release environment
         type: boolean
         default: false
-  push:
-    tags: ['v*']
+      confirm:
+        description: Type PUBLISH for an actual preview publication
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: adapter-release-${{ github.ref }}
+  group: adapter-release
   cancel-in-progress: false
 
-env:
-  MP_RELEASE_EVENT: ${{ github.event_name }}
-  MP_RELEASE_REF: ${{ github.ref_name }}
-  MP_RELEASE_VERSION: ${{ inputs.version }}
-
 jobs:
+  resolve:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      source_sha: ${{ steps.version.outputs.source_sha }}
+      channel: ${{ steps.version.outputs.channel }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Resolve the trusted channel and classified source
+        id: version
+        env:
+          MP_RELEASE_EVENT: ${{ github.event_name }}
+          MP_RELEASE_CHANNEL: ${{ inputs.channel }}
+          MP_RELEASE_PUBLISH: ${{ inputs.publish }}
+          MP_RELEASE_CONFIRM: ${{ inputs.confirm }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./eng/resolve-adapter-publication.ps1
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: provider-version
+          path: artifacts/provider-version.json
+          if-no-files-found: error
+          retention-days: 365
+
   build:
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    needs: resolve
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ needs.resolve.outputs.source_sha }}
           persist-credentials: false
-          fetch-depth: 0
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           global-json-file: global.json
-      - name: Require release source on the main history
-        run: |
-          git merge-base --is-ancestor HEAD refs/remotes/origin/main
-          if ($LASTEXITCODE -ne 0) { throw 'Release source must belong to the main branch history.' }
-      - name: Verify repository
-        run: pwsh -NoProfile -File eng/verify.ps1
-      - name: Validate input and build both payloads without signing secrets
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: provider-version
+          path: artifacts
+      - name: Verify source and build both payloads without production credentials
         id: pack
-        run: pwsh -NoProfile -File eng/pack-adapter.ps1
+        env:
+          MP_RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          ./eng/setup-test-environment.ps1
+          ./eng/verify.ps1
+          ./eng/pack-adapter.ps1
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: unsigned-adapter
-          path: ${{ steps.pack.outputs.package }}
+          path: |
+            ${{ steps.pack.outputs.package }}
+            artifacts/provider-version.json
           if-no-files-found: error
+          retention-days: 365
 
   sign:
-    needs: build
+    needs: [resolve, build]
     runs-on: windows-latest
     environment: adapter-signing
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ needs.resolve.outputs.source_sha }}
           persist-credentials: false
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: unsigned-adapter
           path: artifacts/signing
-      - name: Sign existing package and verify its embedded inventory
+      - name: Sign a dry-run candidate with a disposable in-memory key
+        if: needs.resolve.outputs.publish != 'true'
+        run: |
+          $packages = @(Get-ChildItem -LiteralPath artifacts/signing -Recurse -File -Filter '*.mpadapter')
+          if ($packages.Count -ne 1) { throw 'Exactly one unsigned package is required.' }
+          ./eng/sign-adapter.ps1 -PackagePath $packages[0].FullName -DryRun
+      - name: Sign a trusted publication candidate
+        if: needs.resolve.outputs.publish == 'true'
         env:
           MIRRORPULSE_ADAPTER_SIGNING_PFX_BASE64: ${{ secrets.MIRRORPULSE_ADAPTER_SIGNING_PFX_BASE64 }}
           MIRRORPULSE_ADAPTER_SIGNING_PFX_PASSWORD: ${{ secrets.MIRRORPULSE_ADAPTER_SIGNING_PFX_PASSWORD }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $packages = @(Get-ChildItem -LiteralPath artifacts/signing -File -Filter '*.mpadapter')
-          if ($packages.Count -ne 1) { throw 'Exactly one built package is required.' }
+          $packages = @(Get-ChildItem -LiteralPath artifacts/signing -Recurse -File -Filter '*.mpadapter')
+          if ($packages.Count -ne 1) { throw 'Exactly one unsigned package is required.' }
           ./eng/sign-adapter.ps1 -PackagePath $packages[0].FullName
+      - name: Freeze the signed candidate inventory
+        env:
+          MP_RELEASE_SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+        run: |
+          $packages = @(Get-ChildItem -LiteralPath artifacts/signing -Recurse -File -Filter '*.mpadapter')
+          $metadata = @(Get-ChildItem -LiteralPath artifacts/signing -Recurse -File -Filter 'provider-version.json')
+          if ($packages.Count -ne 1 -or $metadata.Count -ne 1) { throw 'The resolved candidate is incomplete.' }
+          $output = $packages[0].Directory.FullName
+          if ($metadata[0].Directory.FullName -ne $output) { Copy-Item -LiteralPath $metadata[0].FullName -Destination (Join-Path $output 'provider-version.json') }
+          ./eng/build-adapter-release-evidence.ps1 -AssetDirectory $output -SourceSha $env:MP_RELEASE_SOURCE_SHA
+          ./eng/verify-adapter-release-assets.ps1 -AssetDirectory $output -SourceSha $env:MP_RELEASE_SOURCE_SHA
+          New-Item -ItemType Directory -Path artifacts/candidate -Force | Out-Null
+          Get-ChildItem -LiteralPath $output -File | Copy-Item -Destination artifacts/candidate
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: signed-adapter
-          path: artifacts/signing/*
+          path: artifacts/candidate/*
           if-no-files-found: error
+          retention-days: 365
 
-  verify:
-    needs: sign
-    runs-on: windows-latest
+  conformance:
+    needs: [resolve, sign]
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-latest, windows-11-arm]
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ needs.resolve.outputs.source_sha }}
           persist-credentials: false
+          path: provider
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: mirrorpulse/MirrorPulse
-          ref: 16c6742536e4fa54aa37d92d1fe7b11d2ac5bf5e
-          path: mirrorpulse-verifier
+          repository: MirrorPulse/MirrorPulse
+          ref: c4a3aac8bad806a8126373777ed5f5c975ff605c
           persist-credentials: false
+          path: product
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
-          global-json-file: global.json
+          global-json-file: provider/global.json
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: signed-adapter
-          path: artifacts/candidate
-      - name: Verify newly signed package through Host and real protocol fixtures
+          path: provider/artifacts/candidate
+      - name: Prepare the real provider SSH fixture
+        working-directory: provider
+        run: pwsh ./eng/setup-test-environment.ps1
+      - name: Prepare the real production Host SSH fixture
+        working-directory: product
+        run: pwsh ./eng/setup-test-environment.ps1
+      - name: Verify the exact signed package in the native runner and production Host
+        working-directory: provider
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-          GH_TOKEN: ${{ github.token }}
-        run: ./eng/verify-host-worker.ps1 -MirrorPulseRoot mirrorpulse-verifier -CandidateDirectory artifacts/candidate
+          MP_RELEASE_SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+        run: ./eng/verify-signed-adapter-process.ps1 -AssetDirectory artifacts/candidate -SourceSha $env:MP_RELEASE_SOURCE_SHA -ProductRepositoryPath ../product
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
         with:
-          name: candidate-protocol-evidence
+          name: signed-process-${{ matrix.runner }}
           path: |
-            mirrorpulse-verifier/artifacts/candidate-evidence.json
-            mirrorpulse-verifier/artifacts/test-results/candidate/*
+            provider/artifacts/candidate/process-*/*.trx
+            provider/artifacts/candidate/process-*/*-evidence.json
           if-no-files-found: error
+          retention-days: 365
 
   publish:
-    needs: verify
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    needs: [resolve, sign, conformance]
+    if: needs.resolve.outputs.publish == 'true'
     runs-on: windows-latest
-    environment: adapter-release
+    environment: ${{ needs.resolve.outputs.channel }}
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          persist-credentials: false
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: signed-adapter
-          path: artifacts/release
-      - name: Publish verified package
+          path: artifacts/candidate
+      - name: Publish only the verified immutable candidate
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $packages = @(Get-ChildItem -LiteralPath artifacts/release -File -Filter '*.mpadapter')
-          if ($packages.Count -ne 1) { throw 'Exactly one signed package is required.' }
-          ./eng/verify-adapter-signature.ps1 -PackagePath $packages[0].FullName
-          ./eng/publish-adapter-release.ps1 -PackagePath $packages[0].FullName
+          MP_RELEASE_SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+        run: ./eng/publish-adapter-release.ps1 -AssetDirectory artifacts/candidate -SourceSha $env:MP_RELEASE_SOURCE_SHA

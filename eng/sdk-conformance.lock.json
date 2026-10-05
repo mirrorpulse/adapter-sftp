@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "version": "0.2.1",
+  "tag": "sdk-v0.2.1",
+  "sourceSha": "ce74cd358de148f148ce89ffc8478f6fe1920281",
+  "assets": [
+    {
+      "name": "MirrorPulse.Adapter.Conformance-0.2.1-win-arm64.zip",
+      "length": 35359322,
+      "sha256": "066b2283469e533aa317b23a62dbe72e4c6fba179b90b907adab2a6c85427ba2"
+    },
+    {
+      "name": "MirrorPulse.Adapter.Conformance-0.2.1-win-x64.zip",
+      "length": 37017563,
+      "sha256": "b6d2ae3972bd54e16b0215e3f7add33ed5dc32cc3154c59d220e28349377cbdf"
+    },
+    {
+      "name": "MirrorPulse.Worker.Spec-0.2.1.zip",
+      "length": 10443,
+      "sha256": "96cff574e268777b1c58c6a85602d99455636b77b445b024ec4f73b9128a7bec"
+    }
+  ]
+}
