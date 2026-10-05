@@ -10,8 +10,12 @@ permissions:
 
 jobs:
   build:
-    name: build-and-test
-    runs-on: windows-latest
+    name: build-and-test (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-latest, windows-11-arm]
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
@@ -19,7 +23,16 @@ jobs:
           global-json-file: global.json
       - name: Prepare the isolated real SSH fixture
         run: pwsh ./eng/setup-test-environment.ps1
-      - name: Verify Adapter build
+      - name: Verify Adapter source and real protocol boundaries
         run: pwsh ./eng/verify.ps1
-      - name: Verify release input and dual-RID packaging without production keys
+      - name: Verify exact signed dual-RID package with its private runtime
         run: pwsh -NoProfile -File eng/verify-release.ps1
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: sftp-conformance-${{ matrix.runner }}
+          path: |
+            artifacts/test-results/*.trx
+            artifacts/release/*/native-conformance.json
+          if-no-files-found: error
+          retention-days: 365

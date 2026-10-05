@@ -35,5 +35,18 @@ SSH sources with different credentials and keys. The process tests exercise
 actual SSH authentication, pinned and interactive key decisions, root-bound
 pagination and ranges, stale reads and explicit disabled-root behavior.
 
-Self-contained packaging and protected signed v2 publication are subsequent
+Protected signed v2 publication and production Host acceptance are subsequent
 acceptance gates. The current source tests do not establish those gates.
+
+## Package execution
+
+The development package includes a private .NET runtime for `win-x64` and
+`win-arm64`, including `createdump.exe`, runtime notices and the exact locked
+third-party dependency licenses. Signing and verification use the shared ordinal
+canonical inventory. Conformance launches the signed payload with shared runtime
+lookup disabled and checks the actual loaded `coreclr.dll` path.
+
+CI runs the source and signed package profiles on native x64 and ARM64 runners.
+Original TRX and package hash receipts are retained as artifacts. Organization
+signing, production Host acceptance and protected publication remain separate
+release gates.
