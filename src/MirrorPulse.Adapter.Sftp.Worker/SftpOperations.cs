@@ -23,11 +23,11 @@ internal static class SftpOperations
         var items = new List<ISftpFile>();
         await foreach (ISftpFile item in root.Client.ListDirectoryAsync(path, token).ConfigureAwait(false))
         {
-            if (item.Name is "." or "..") continue;
             // SSH.NET exposes Name as the last path segment. Check FullName too
             // so a hostile raw directory entry cannot be normalized into an alias.
             if (item.FullName != prefix + item.Name)
                 throw new InvalidDataException("DirectoryEnumerationIncomplete");
+            if (item.Name is "." or "..") continue;
             if (items.Count >= 8192 || item.Name.Length is < 1 or > 4096 || item.Name.Contains('/') ||
                 item.Name.Contains('\\') || item.Name.Contains(':') || item.Name.Any(char.IsControl) ||
                 item.IsSymbolicLink || (!item.IsDirectory && !item.IsRegularFile))

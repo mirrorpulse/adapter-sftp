@@ -83,6 +83,10 @@ class Storage(paramiko.SFTPServerInterface):
                 attributes.filename = name
                 return [attributes]
             entries = []
+            for name in (".", ".."):
+                attributes = paramiko.SFTPAttributes.from_stat(os.stat(self._local(path)))
+                attributes.filename = name
+                entries.append(attributes)
             for name in os.listdir(self._local(path)):
                 if name == ".fixture-canonical-parent":
                     continue
