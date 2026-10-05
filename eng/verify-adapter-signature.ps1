@@ -2,6 +2,7 @@
 param([Parameter(Mandatory)][string]$PackagePath)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'release-policy.ps1')
+. (Join-Path $PSScriptRoot 'adapter-signature-policy.ps1')
 $rsa = [Security.Cryptography.RSA]::Create()
 $rsa.ImportFromPem((Get-Content -LiteralPath "$PackagePath.public.pem" -Raw))
 $archive = [IO.Compression.ZipFile]::OpenRead($PackagePath)
@@ -12,7 +13,7 @@ try {
     try { $envelope = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
     if ($envelope.algorithm -cne 'RSA-SHA256') { throw 'The signing algorithm is unsupported.' }
     $inventory = @($envelope.files | ForEach-Object { [ordered]@{ path = $_.path; length = [long]$_.length; sha256 = $_.sha256 } })
-    $canonical = ConvertTo-Json -InputObject $inventory -Compress -Depth 5
+    $canonical = Get-AdapterSignatureCanonical -Inventory $inventory
     if (-not $rsa.VerifyData([Text.Encoding]::UTF8.GetBytes($canonical), [Convert]::FromBase64String($envelope.signature),
         [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)) { throw 'The package signature is invalid.' }
     if ($archive.Entries.Count -ne $inventory.Count + 1) { throw 'The package inventory is incomplete.' }

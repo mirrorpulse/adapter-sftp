@@ -2,6 +2,8 @@
 param([Parameter(Mandatory)][string]$PackagePath, [switch]$DryRun)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'release-policy.ps1')
+. (Join-Path $PSScriptRoot 'adapter-signature-policy.ps1')
+Assert-AdapterPackageIdentity -PackagePath $PackagePath
 $stream = [IO.File]::Open($PackagePath, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
 $archive = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Update)
 $certificate = $null
@@ -19,8 +21,8 @@ try {
             try { $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($input)) } finally { $input.Dispose() }
             [ordered]@{ path = $entry.FullName; length = $length; sha256 = $hash }
         }
-    ) | Sort-Object { $_['path'] } -CaseSensitive
-    $canonical = ConvertTo-Json -InputObject @($inventory) -Compress -Depth 5
+    )
+    $canonical = Get-AdapterSignatureCanonical -Inventory $inventory
     if ($DryRun) {
         $key = [Security.Cryptography.RSA]::Create(3072)
         try {

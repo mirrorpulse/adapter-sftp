@@ -1,0 +1,42 @@
+[
+  {
+    "files": [
+      "LICENSE"
+    ],
+    "packageId": "MirrorPulse.Adapter.Sdk",
+    "version": "0.2.1"
+  },
+  {
+    "sourceCommit": "7b2fd3dbf2c86a80a7b06cea020aa5f821c9902e",
+    "sha256": "84C79A38515DE2833A7C353395E04056C0CBD77545D450FE216D569E1570B78E",
+    "files": [
+      "LICENSE.txt"
+    ],
+    "vendored": "dependency-licenses/ssh.net-2026.0.0-LICENSE.txt",
+    "version": "2026.0.0",
+    "packageId": "SSH.NET"
+  },
+  {
+    "files": [
+      "LICENSE.md"
+    ],
+    "packageId": "BouncyCastle.Cryptography",
+    "version": "2.7.0"
+  },
+  {
+    "files": [
+      "LICENSE.TXT",
+      "THIRD-PARTY-NOTICES.TXT"
+    ],
+    "packageId": "Microsoft.Extensions.Logging.Abstractions",
+    "version": "8.0.3"
+  },
+  {
+    "files": [
+      "LICENSE.TXT",
+      "THIRD-PARTY-NOTICES.TXT"
+    ],
+    "packageId": "Microsoft.Extensions.DependencyInjection.Abstractions",
+    "version": "8.0.2"
+  }
+]

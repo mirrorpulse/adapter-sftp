@@ -1,22 +1,49 @@
 Set-StrictMode -Version Latest
 
 function Get-AdapterReleaseVersion {
-    param([AllowEmptyString()][string]$Value)
-    if ($Value.Length -gt 32 -or $Value -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))?$') {
-        throw 'The Adapter version must be a canonical numeric version with three or four components.'
+    param([AllowNull()][AllowEmptyString()][string]$Value)
+    if (-not $Value -or $Value.Length -gt 64 -or
+        $Value -cnotmatch '\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*)|-preview\.([1-9][0-9]*))?\z') {
+        throw 'The Adapter version must be canonical X.Y.Z, X.Y.Z-preview.N, or a preserved legacy four-part identity.'
     }
+    $preview = $Matches[5]
     $parsed = $null
-    if (-not [Version]::TryParse($Value, [ref]$parsed)) { throw 'The Adapter version is outside the supported range.' }
+    if (-not [Version]::TryParse(($Value -split '-preview\.')[0], [ref]$parsed)) { throw 'The Adapter version is outside the supported range.' }
+    if ($preview) {
+        $ordinal = 0
+        if (-not [int]::TryParse($preview, [ref]$ordinal)) { throw 'The Adapter preview counter is outside the supported range.' }
+    }
     return $Value
 }
 
 function Resolve-AdapterReleaseVersion {
-    if ($env:MP_RELEASE_EVENT -eq 'push') {
-        $tag = $env:MP_RELEASE_REF
-        if ([string]::IsNullOrEmpty($tag) -or -not $tag.StartsWith('v', [StringComparison]::Ordinal)) { throw 'The release tag is invalid.' }
-        return Get-AdapterReleaseVersion $tag.Substring(1)
+    if ($env:MP_RELEASE_EVENT -ceq 'push') {
+        $tag = [string]$env:MP_RELEASE_REF
+        if (-not $tag.StartsWith('v', [StringComparison]::Ordinal)) { throw 'The release tag is invalid.' }
+        $version = Get-AdapterReleaseVersion $tag.Substring(1)
+        if ($env:MP_RELEASE_VERSION -and (Get-AdapterReleaseVersion $env:MP_RELEASE_VERSION) -cne $version) {
+            throw 'The explicit release version differs from the release tag.'
+        }
+        return $version
     }
     return Get-AdapterReleaseVersion ([string]$env:MP_RELEASE_VERSION)
+}
+
+function Assert-AdapterPackageIdentity {
+    param([Parameter(Mandatory)][string]$PackagePath, [string]$ExpectedVersion)
+    $archive = [IO.Compression.ZipFile]::OpenRead($PackagePath)
+    try {
+        $entry = $archive.GetEntry('manifest.json')
+        if ($null -eq $entry -or $entry.Length -gt 1MB) { throw 'The Adapter manifest is missing or too large.' }
+        $reader = [IO.StreamReader]::new($entry.Open())
+        try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
+        $version = Get-AdapterReleaseVersion $manifest.version
+        if ($manifest.adapterId -cnotmatch '\A[a-z0-9]+(\.[a-z0-9-]+)+\z' -or
+            [IO.Path]::GetFileName($PackagePath) -cne "$($manifest.adapterId)-$version.mpadapter" -or
+            ($ExpectedVersion -and $version -cne (Get-AdapterReleaseVersion $ExpectedVersion))) {
+            throw 'The package filename, manifest, and release version must have the same canonical identity.'
+        }
+    } finally { $archive.Dispose() }
 }
 
 function Assert-AdapterPackagePath {
