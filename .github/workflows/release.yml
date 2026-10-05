@@ -80,8 +80,41 @@ jobs:
           path: artifacts/signing/*
           if-no-files-found: error
 
-  publish:
+  verify:
     needs: sign
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: mirrorpulse/MirrorPulse
+          ref: 16c6742536e4fa54aa37d92d1fe7b11d2ac5bf5e
+          path: mirrorpulse-verifier
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: signed-adapter
+          path: artifacts/candidate
+      - name: Verify newly signed package through Host and real protocol fixtures
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+        run: ./eng/verify-host-worker.ps1 -MirrorPulseRoot mirrorpulse-verifier -CandidateDirectory artifacts/candidate
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: candidate-protocol-evidence
+          path: |
+            mirrorpulse-verifier/artifacts/candidate-evidence.json
+            mirrorpulse-verifier/artifacts/test-results/candidate/*
+          if-no-files-found: error
+
+  publish:
+    needs: verify
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
     runs-on: windows-latest
     environment: adapter-release

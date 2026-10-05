@@ -31,3 +31,8 @@ The repository owner must configure environment reviewers, trusted branch/tag
 rules and signing-secret scope. YAML environment names alone do not enforce those
 protections. Existing organization secrets remain compatible until that migration.
 The current framework-dependent v1 runtime is retained by this release change.
+
+The release workflow also verifies the newly signed candidate using MirrorPulse
+16c6742 and real Local/WebDAV/SMB/FTP/SFTP Host/Worker fixtures on a disposable
+runner. It records both source commits and the candidate package hash. Publishing
+requires that protocol gate; signed dry-run assets remain unpublished.
