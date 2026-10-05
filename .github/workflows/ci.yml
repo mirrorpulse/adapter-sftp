@@ -17,6 +17,8 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           global-json-file: global.json
+      - name: Prepare the isolated real SSH fixture
+        run: pwsh ./eng/setup-test-environment.ps1
       - name: Verify Adapter build
         run: pwsh ./eng/verify.ps1
       - name: Verify release input and dual-RID packaging without production keys

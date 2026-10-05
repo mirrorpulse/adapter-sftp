@@ -1,10 +1,22 @@
 [CmdletBinding()]
 param()
-$ErrorActionPreference = "Stop"
-$project = 'src/MirrorPulse.Adapter.Sftp.Worker/MirrorPulse.Adapter.Sftp.Worker.csproj'
-& dotnet restore $project --locked-mode
-if ($LASTEXITCODE -ne 0) { throw "Worker restore failed." }
-foreach ($rid in @("win-x64", "win-arm64")) {
-    & dotnet build $project --configuration Release --runtime $rid --no-restore
-    if ($LASTEXITCODE -ne 0) { throw "Worker build failed for $rid." }
+$ErrorActionPreference = 'Stop'
+& pwsh -NoProfile -File (Join-Path $PSScriptRoot 'restore-adapter-sdk.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fixed SDK verification failed.' }
+$projects = @('src/MirrorPulse.Adapter.Sftp.Worker/MirrorPulse.Adapter.Sftp.Worker.csproj',
+    'tests/MirrorPulse.Adapter.Sftp.Worker.Tests/MirrorPulse.Adapter.Sftp.Worker.Tests.csproj')
+foreach ($project in $projects) {
+    & dotnet restore $project --locked-mode
+    if ($LASTEXITCODE -ne 0) { throw 'Locked restore failed.' }
+    & dotnet build $project -c Release --no-restore
+    if ($LASTEXITCODE -ne 0) { throw 'Release build failed.' }
+    & dotnet format $project --no-restore --verify-no-changes
+    if ($LASTEXITCODE -ne 0) { throw 'Formatting failed.' }
+}
+& dotnet test $projects[1] -c Release --no-build --no-restore --logger 'trx;LogFileName=sftp-v2.trx' --results-directory artifacts/test-results
+if ($LASTEXITCODE -ne 0) { throw 'Actual SFTP conformance failed.' }
+[xml]$trx = Get-Content -LiteralPath artifacts/test-results/sftp-v2.trx -Raw
+$counts = $trx.TestRun.ResultSummary.Counters
+if ($counts.total -ne 8 -or $counts.executed -ne 8 -or $counts.passed -ne 8 -or $counts.notExecuted -ne 0) {
+    throw 'All SFTP source cases must execute without skips.'
 }

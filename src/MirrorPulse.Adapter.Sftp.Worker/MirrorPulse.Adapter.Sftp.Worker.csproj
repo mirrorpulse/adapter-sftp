@@ -8,6 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="SSH.NET" />
-    <ProjectReference Include="..\MirrorPulse.Adapter.Sdk\MirrorPulse.Adapter.Sdk.csproj" />
+    <PackageReference Include="MirrorPulse.Adapter.Sdk" />
   </ItemGroup>
 </Project>
