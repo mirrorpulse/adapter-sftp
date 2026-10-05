@@ -1,0 +1,32 @@
+name: Branch policy
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate-main-pr:
+    if: github.event.pull_request.base.ref == 'main'
+    name: validate-main-pr
+    runs-on: windows-latest
+    steps:
+      - name: Require develop and one release label
+        shell: pwsh
+        env:
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPOSITORY: ${{ github.repository }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          if ($env:HEAD_BRANCH -cne 'develop' -or $env:HEAD_REPOSITORY -cne $env:BASE_REPOSITORY) {
+              throw 'Pull requests into main must originate from the same repository develop branch.'
+          }
+          $releaseLabels = @($env:LABELS -split ',' | Where-Object { $_ -cin @('breaking', 'feature', 'fix') })
+          if ($releaseLabels.Count -ne 1) {
+              throw 'A main pull request requires exactly one of: breaking, feature, fix.'
+          }
+          Write-Host "Release classification: $($releaseLabels[0])"
