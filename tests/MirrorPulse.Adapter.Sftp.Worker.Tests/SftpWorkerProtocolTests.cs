@@ -9,6 +9,17 @@ public sealed class SftpWorkerProtocolTests
     private static readonly string[] EnabledRoots = ["left", "right"];
     private static readonly string[] FirstRoot = ["left"];
     [TestMethod]
+    public async Task AHostileServerEntryCannotBeNormalizedIntoAnAuthorizedAlias()
+    {
+        await using var session = await SftpWorkerSession.StartAsync();
+        await File.WriteAllTextAsync(Path.Combine(session.Left.Storage, ".fixture-listing.json"), "{\"name\":\"../escape.txt\"}");
+        AdapterControlFrame refused = await session.RequestAsync("List", new { rootKey = "left", path = "", pageSize = 512 });
+        Assert.AreEqual("OperationError", refused.MessageType);
+        Assert.AreEqual("DirectoryEnumerationIncomplete", refused.Payload.GetProperty("code").GetString());
+        Assert.AreEqual("right", Encoding.UTF8.GetString(await session.ReadRangeAsync("right", "same.txt", 5)));
+    }
+
+    [TestMethod]
     public async Task TwoSourcesKeepCredentialsNamesVersionsAndRangesBoundToTheirRoots()
     {
         await using var session = await SftpWorkerSession.StartAsync();

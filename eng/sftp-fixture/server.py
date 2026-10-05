@@ -62,6 +62,13 @@ class Storage(paramiko.SFTPServerInterface):
 
     def list_folder(self, path):
         try:
+            injected = os.path.join(self.root, ".fixture-listing.json")
+            if os.path.exists(injected):
+                with open(injected, encoding="utf-8") as source:
+                    name = json.load(source)["name"]
+                attributes = paramiko.SFTPAttributes.from_stat(os.stat(os.path.join(self.root, "same.txt")))
+                attributes.filename = name
+                return [attributes]
             entries = []
             for name in os.listdir(self._local(path)):
                 local = os.path.join(self._local(path), name)
