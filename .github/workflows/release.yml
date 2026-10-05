@@ -4,136 +4,101 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Semantic version without the v prefix
+        description: Canonical numeric version without the v prefix
         required: true
         default: 0.1.0
+      publish:
+        description: Publish a Release after signing; false only uploads verified artifacts
+        type: boolean
+        default: false
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: adapter-release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
-  ADAPTER_ID: 'com.mirrorpulse.adapter.sftp'
-  ADAPTER_LABEL: 'SFTP'
-  WORKER_PROJECT: 'src/MirrorPulse.Adapter.Sftp.Worker/MirrorPulse.Adapter.Sftp.Worker.csproj'
+  MP_RELEASE_EVENT: ${{ github.event_name }}
+  MP_RELEASE_REF: ${{ github.ref_name }}
+  MP_RELEASE_VERSION: ${{ inputs.version }}
 
 jobs:
-  release:
+  build:
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     steps:
-      - name: Check out source
-        uses: actions/checkout@v7
-
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           global-json-file: global.json
+      - name: Require release source on the main history
+        run: |
+          git merge-base --is-ancestor HEAD refs/remotes/origin/main
+          if ($LASTEXITCODE -ne 0) { throw 'Release source must belong to the main branch history.' }
+      - name: Verify repository
+        run: pwsh -NoProfile -File eng/verify.ps1
+      - name: Validate input and build both payloads without signing secrets
+        id: pack
+        run: pwsh -NoProfile -File eng/pack-adapter.ps1
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: unsigned-adapter
+          path: ${{ steps.pack.outputs.package }}
+          if-no-files-found: error
 
-      - name: Restore
-        run: dotnet restore $env:WORKER_PROJECT --locked-mode
-
-      - name: Build signed .mpadapter
-        shell: pwsh
+  sign:
+    needs: build
+    runs-on: windows-latest
+    environment: adapter-signing
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: unsigned-adapter
+          path: artifacts/signing
+      - name: Sign existing package and verify its embedded inventory
         env:
           MIRRORPULSE_ADAPTER_SIGNING_PFX_BASE64: ${{ secrets.MIRRORPULSE_ADAPTER_SIGNING_PFX_BASE64 }}
           MIRRORPULSE_ADAPTER_SIGNING_PFX_PASSWORD: ${{ secrets.MIRRORPULSE_ADAPTER_SIGNING_PFX_PASSWORD }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $version = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.version }}' } else { '${{ github.ref_name }}'.TrimStart('v', 'V') }
-          $parsed = $null
-          if (-not [Version]::TryParse($version, [ref]$parsed)) { throw "Invalid Adapter version: $version" }
-          if ([string]::IsNullOrWhiteSpace($env:MIRRORPULSE_ADAPTER_SIGNING_PFX_BASE64) -or [string]::IsNullOrWhiteSpace($env:MIRRORPULSE_ADAPTER_SIGNING_PFX_PASSWORD)) { throw 'Adapter signing secrets are not configured.' }
+          $packages = @(Get-ChildItem -LiteralPath artifacts/signing -File -Filter '*.mpadapter')
+          if ($packages.Count -ne 1) { throw 'Exactly one built package is required.' }
+          ./eng/sign-adapter.ps1 -PackagePath $packages[0].FullName
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: signed-adapter
+          path: artifacts/signing/*
+          if-no-files-found: error
 
-          $root = Join-Path $env:RUNNER_TEMP 'mirrorpulse-adapter-release'
-          $packageRoot = Join-Path $root 'package'
-          $publishRoot = Join-Path $root 'publish'
-          $packagePath = Join-Path $root "$env:ADAPTER_ID-$version.mpadapter"
-          New-Item -ItemType Directory -Path $packageRoot, $publishRoot -Force | Out-Null
-
-          foreach ($runtime in @('win-x64', 'win-arm64')) {
-            $output = Join-Path $publishRoot $runtime
-            dotnet publish $env:WORKER_PROJECT --configuration Release --runtime $runtime --self-contained false --output $output --no-restore
-            if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed for $runtime" }
-            $destination = Join-Path $packageRoot "worker/$runtime"
-            New-Item -ItemType Directory -Path $destination -Force | Out-Null
-            Copy-Item (Join-Path $output '*') $destination -Recurse -Force
-            $worker = Get-ChildItem $destination -Filter '*.exe' -File | Select-Object -First 1
-            if ($null -eq $worker) { throw "No Worker executable was produced for $runtime" }
-            Rename-Item $worker.FullName (Join-Path $destination 'MirrorPulse.Adapter.Worker.exe')
-          }
-
-          $manifest = [ordered]@{
-            schemaVersion = 1
-            adapterId = $env:ADAPTER_ID
-            publisher = 'MirrorPulse'
-            version = $version
-            protocol = [ordered]@{ minimum = 1; maximum = 1 }
-            entrypoints = [ordered]@{ 'win-x64' = 'worker/win-x64/MirrorPulse.Adapter.Worker.exe'; 'win-arm64' = 'worker/win-arm64/MirrorPulse.Adapter.Worker.exe' }
-            installPolicy = [ordered]@{ maximumInstallations = $null }
-            instancePolicy = [ordered]@{ maximumInstances = $null; maximumRootDefinitions = $null }
-            rootDefinitions = @([ordered]@{ key = $env:ADAPTER_ID.Split('.')[-1]; label = $env:ADAPTER_LABEL; directoryName = $env:ADAPTER_LABEL; customEntry = $false })
-            capabilities = [ordered]@{ network = $true; sourceDirectory = $false; remoteChanges = $true; rangeRead = $true }
-            locales = @('en-US')
-            localeMetadata = [ordered]@{ 'en-US' = [ordered]@{ displayName = $env:ADAPTER_LABEL; resourcePath = 'locales/en-US.json' } }
-            minimumMirrorPulseVersion = '1.0.0'
-          }
-          New-Item -ItemType Directory -Path (Join-Path $packageRoot 'locales') -Force | Out-Null
-          $manifest | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $packageRoot 'manifest.json') -Encoding utf8
-          ([ordered]@{ displayName = $env:ADAPTER_LABEL } | ConvertTo-Json -Compress) | Set-Content (Join-Path $packageRoot 'locales/en-US.json') -Encoding utf8
-
-          Add-Type -AssemblyName System.IO.Compression
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $archiveStream = [IO.File]::Open($packagePath, [IO.FileMode]::Create)
-          $archive = [IO.Compression.ZipArchive]::new($archiveStream, [IO.Compression.ZipArchiveMode]::Create)
-          try {
-            foreach ($file in Get-ChildItem $packageRoot -File -Recurse | Sort-Object FullName) {
-              $relative = [IO.Path]::GetRelativePath($packageRoot, $file.FullName).Replace('\', '/')
-              $entry = $archive.CreateEntry($relative, [IO.Compression.CompressionLevel]::Optimal)
-              $entry.LastWriteTime = [DateTimeOffset]::new(1980, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
-              $input = [IO.File]::OpenRead($file.FullName)
-              try { $output = $entry.Open(); try { $input.CopyTo($output) } finally { $output.Dispose() } } finally { $input.Dispose() }
-            }
-          } finally { $archive.Dispose(); $archiveStream.Dispose() }
-
-          $inventory = @(
-            Get-ChildItem $packageRoot -File -Recurse | ForEach-Object {
-              $relative = [IO.Path]::GetRelativePath($packageRoot, $_.FullName).Replace('\', '/')
-              $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([IO.File]::ReadAllBytes($_.FullName)))
-              [ordered]@{ path = $relative; length = $_.Length; sha256 = $hash }
-            } | Sort-Object { $_['path'] } -CaseSensitive
-          )
-          $canonical = $inventory | ConvertTo-Json -Compress -Depth 5
-          $pfx = [Convert]::FromBase64String($env:MIRRORPULSE_ADAPTER_SIGNING_PFX_BASE64)
-          $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx, $env:MIRRORPULSE_ADAPTER_SIGNING_PFX_PASSWORD, [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
-          $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($certificate)
-          if ($null -eq $rsa) { throw 'The signing certificate has no RSA private key.' }
-          try {
-            $signature = [Convert]::ToBase64String($rsa.SignData([Text.Encoding]::UTF8.GetBytes($canonical), [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1))
-          } finally { $rsa.Dispose(); $certificate.Dispose() }
-          $signaturePath = "$packagePath.signature.json"
-          $signatureEnvelope = [ordered]@{ algorithm = 'RSA-SHA256'; signer = 'MirrorPulse Team'; signature = $signature; files = $inventory } |
-            ConvertTo-Json -Depth 8
-          $signatureEnvelope | Set-Content $signaturePath -Encoding utf8
-          $packageStream = [IO.File]::Open($packagePath, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite)
-          $archive = [IO.Compression.ZipArchive]::new($packageStream, [IO.Compression.ZipArchiveMode]::Update)
-          try {
-            $entry = $archive.CreateEntry('META-INF/mirrorpulse/signature.json', [IO.Compression.CompressionLevel]::Optimal)
-            $entry.LastWriteTime = [DateTimeOffset]::new(1980, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
-            $writer = [IO.StreamWriter]::new($entry.Open(), [Text.UTF8Encoding]::new($false))
-            try { $writer.Write($signatureEnvelope) } finally { $writer.Dispose() }
-          } finally { $archive.Dispose(); $packageStream.Dispose() }
-          "package=$packagePath" | Out-File $env:GITHUB_OUTPUT -Append
-          "signature=$signaturePath" | Out-File $env:GITHUB_OUTPUT -Append
-        id: package
-
-      - name: Publish Release
-        shell: pwsh
+  publish:
+    needs: sign
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: windows-latest
+    environment: adapter-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: signed-adapter
+          path: artifacts/release
+      - name: Publish verified package
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $version = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.version }}' } else { '${{ github.ref_name }}'.TrimStart('v', 'V') }
-          $tag = "v$version"
-          if ('${{ github.event_name }}' -eq 'workflow_dispatch') { git tag $tag; git push origin $tag }
-          gh release create $tag '${{ steps.package.outputs.package }}' '${{ steps.package.outputs.signature }}' --title "$env:ADAPTER_LABEL $version" --notes "Signed MirrorPulse Adapter release $version." --verify-tag
+          $ErrorActionPreference = 'Stop'
+          $packages = @(Get-ChildItem -LiteralPath artifacts/release -File -Filter '*.mpadapter')
+          if ($packages.Count -ne 1) { throw 'Exactly one signed package is required.' }
+          ./eng/verify-adapter-signature.ps1 -PackagePath $packages[0].FullName
+          ./eng/publish-adapter-release.ps1 -PackagePath $packages[0].FullName

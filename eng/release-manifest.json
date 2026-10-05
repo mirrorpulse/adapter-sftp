@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "adapterId": "com.mirrorpulse.adapter.sftp",
+  "publisher": "MirrorPulse",
+  "version": "0.1.0",
+  "protocol": {
+    "minimum": 1,
+    "maximum": 1
+  },
+  "entrypoints": {
+    "win-x64": "worker/win-x64/MirrorPulse.Adapter.Worker.exe",
+    "win-arm64": "worker/win-arm64/MirrorPulse.Adapter.Worker.exe"
+  },
+  "installPolicy": {
+    "maximumInstallations": null
+  },
+  "instancePolicy": {
+    "maximumInstances": null,
+    "maximumRootDefinitions": null
+  },
+  "rootDefinitions": [
+    {
+      "key": "sftp",
+      "label": "SFTP",
+      "directoryName": "SFTP",
+      "customEntry": false
+    }
+  ],
+  "capabilities": {
+    "network": true,
+    "sourceDirectory": false,
+    "remoteChanges": true,
+    "rangeRead": true
+  },
+  "locales": [
+    "en-US"
+  ],
+  "localeMetadata": {
+    "en-US": {
+      "displayName": "SFTP",
+      "resourcePath": "locales/en-US.json"
+    }
+  },
+  "minimumMirrorPulseVersion": "1.0.0"
+}
