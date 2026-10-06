@@ -97,7 +97,9 @@ The controller builds once, signs and freezes the source, version and asset
 hashes, then runs the exact candidate on native x64 and ARM64. It consumes fixed
 SDK 0.2.1 assets and the fixed production Host verifier. The Host profile checks
 independent pinned SSH sources, credentials, CfSharp reads, disabled roots,
-private runtime loading and safe mutation refusal. Safe write capabilities remain
-an open release requirement. Signing keys are supplied only to the protected
+private runtime loading, optimistic uploads and stable retries, retained content,
+file moves/deletes, directory creation/empty deletion and read-only root refusal.
+Both native profiles must pass against the exact signed candidate before formal
+v2 publication. Signing keys are supplied only to the protected
 signing job and are never read from private files or exported. Existing assets
 and tags remain immutable.
