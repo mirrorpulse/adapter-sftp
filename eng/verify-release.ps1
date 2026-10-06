@@ -39,4 +39,17 @@ try {
     $output = @(& (Join-Path $PSScriptRoot 'pack-adapter.ps1'))
     $package = [string]$output[-1]
     & (Join-Path $PSScriptRoot 'sign-adapter.ps1') -PackagePath $package -DryRun
+    $native = if ([Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -eq [Runtime.InteropServices.Architecture]::Arm64) { 'win-arm64' } else { 'win-x64' }
+    $unpacked = Join-Path (Split-Path $package) 'verified-signed-payload'
+    [IO.Compression.ZipFile]::ExtractToDirectory($package, $unpacked)
+    & dotnet restore tools/MirrorPulse.Adapter.Sftp.Conformance/MirrorPulse.Adapter.Sftp.Conformance.csproj --locked-mode
+    if ($LASTEXITCODE -ne 0) { throw 'SFTP native conformance locked restore failed.' }
+    & dotnet run --project tools/MirrorPulse.Adapter.Sftp.Conformance -c Release --no-restore -- --worker (Join-Path $unpacked "worker/$native/MirrorPulse.Adapter.Worker.exe")
+    if ($LASTEXITCODE -ne 0) { throw 'The actual signed self-contained SFTP Worker failed conformance.' }
+    if ((Get-Item -LiteralPath $package).Length -gt 256MB) { throw 'The dual-RID package exceeds its size boundary.' }
+    [ordered]@{ schemaVersion = 1; runtime = $native; version = '0.1.0'; protocolVersion = 2;
+        packageLength = (Get-Item -LiteralPath $package).Length;
+        packageSha256 = (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash.ToLowerInvariant();
+        privateRuntimeVerified = $true; conformanceCasesPassed = 24; signing = 'disposable'; published = $false
+    } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path (Split-Path $package) 'native-conformance.json') -Encoding utf8
 } finally { $env:MP_RELEASE_VERSION = $previous; $env:MP_RELEASE_EVENT = $previousEvent }

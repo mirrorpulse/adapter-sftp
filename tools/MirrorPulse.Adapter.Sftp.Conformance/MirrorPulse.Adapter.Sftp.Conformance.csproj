@@ -2,12 +2,10 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <IsTestProject>false</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="SSH.NET" />
-    <PackageReference Include="MirrorPulse.Adapter.Sdk" />
+    <ProjectReference Include="../../tests/MirrorPulse.Adapter.Sftp.Worker.Tests/MirrorPulse.Adapter.Sftp.Worker.Tests.csproj" />
   </ItemGroup>
 </Project>
