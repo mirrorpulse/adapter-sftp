@@ -31,7 +31,7 @@ try {
     Push-Location $product
     try {
         $productSha = (& git rev-parse HEAD | Out-String).Trim()
-        if ($productSha -cne 'c4a3aac8bad806a8126373777ed5f5c975ff605c') { throw 'The product verifier source differs from its fixed contract.' }
+        if ($productSha -cne '7f73b90f197f1505839c79c3753965e1e63e95cc') { throw 'The product verifier source differs from its fixed contract.' }
         & pwsh -NoProfile -File eng/restore-adapter-sdk.ps1
         if ($LASTEXITCODE -ne 0) { throw 'Pinned product SDK verification failed.' }
         & dotnet restore tests/MirrorPulse.Core.Tests/MirrorPulse.Core.Tests.csproj --locked-mode --packages artifacts/provider-process-packages
