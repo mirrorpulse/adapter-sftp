@@ -11,6 +11,8 @@ internal sealed class SftpServerFixture(Process process, string storage, int por
     public string Label { get; } = label;
     public IReadOnlyList<string> MutationCommands => File.Exists(Path.Combine(Storage, ".fixture-mutations.log"))
         ? File.ReadAllLines(Path.Combine(Storage, ".fixture-mutations.log")) : [];
+    public int PublishedUploads => MutationCommands.Count(line => line.StartsWith("PUBLISH ", StringComparison.Ordinal));
+    public void Fault(string name) => File.WriteAllText(Path.Combine(Storage, ".fixture-" + name), "enabled");
     public byte[]? ReadStoredFile(string path)
     {
         string local = Path.Combine(Storage, path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
@@ -41,6 +43,7 @@ internal sealed class SftpServerFixture(Process process, string storage, int por
         start.ArgumentList.Add(storage);
         start.ArgumentList.Add(label);
         Process process = Process.Start(start) ?? throw new InvalidOperationException("Fixture launch failed.");
+        Task<string> startupErrors = process.StandardError.ReadToEndAsync();
         try
         {
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
@@ -49,12 +52,13 @@ internal sealed class SftpServerFixture(Process process, string storage, int por
             return new(process, storage, ready.RootElement.GetProperty("port").GetInt32(),
                 ready.RootElement.GetProperty("sha256").GetString()!, label);
         }
-        catch
+        catch (Exception exception)
         {
             if (!process.HasExited) { process.Kill(entireProcessTree: true); await process.WaitForExitAsync(); }
+            string diagnostic = await startupErrors;
             process.Dispose();
             Directory.Delete(storage, true);
-            throw;
+            throw new InvalidOperationException("The disposable SSH fixture failed to start: " + diagnostic, exception);
         }
     }
 

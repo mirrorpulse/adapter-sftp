@@ -26,12 +26,14 @@ internal sealed record SftpWorkerRoot(string Key, SftpWorkerConfiguration Config
     string HostKeySha256, bool AllowsMutations)
 {
     private bool _requiresReconnect;
+    public Func<bool>? RejectedHostKey { get; init; }
     public void RequireReconnect() => _requiresReconnect = true;
     public async Task EnsureConnectedAsync(CancellationToken token)
     {
         if (!_requiresReconnect && Client.IsConnected) return;
         Client.Disconnect();
-        await Client.ConnectAsync(token).ConfigureAwait(false);
+        try { await Client.ConnectAsync(token).ConfigureAwait(false); }
+        catch (Exception) when (RejectedHostKey?.Invoke() == true) { throw new InvalidDataException("HostKeyRejected"); }
         _requiresReconnect = false;
     }
 }
@@ -110,7 +112,8 @@ internal sealed class SftpWorkerRoots : IDisposable
                 {
                     await client.ConnectAsync(token).ConfigureAwait(false);
                     roots._roots.Add(binding.RootKey, new(binding.RootKey, configuration, client,
-                        accepted ?? throw new InvalidDataException("HostKeyRejected"), mutationPolicy == "Optimistic"));
+                        accepted ?? throw new InvalidDataException("HostKeyRejected"), mutationPolicy == "Optimistic")
+                    { RejectedHostKey = () => rejected });
                 }
                 catch (Exception) when (rejected) { client.Dispose(); throw new InvalidDataException("HostKeyRejected"); }
                 catch { client.Dispose(); throw; }

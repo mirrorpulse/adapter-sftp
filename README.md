@@ -43,6 +43,13 @@ republish it. Unknown results retain data and evidence and return
 and receipts consume remote space; the Worker has no local persistent store.
 Local transfer leases are released after success, failure or receive cancellation.
 
+Remote proof survives Worker restart. Corrupt or oversized proof blocks mutation.
+True disconnects after publication or namespace changes return an unknown result;
+stable retries inspect the source, target and retained content before proceeding.
+Publication reaches a terminal result before queued Cancel is processed, so a
+cancellation acknowledgement is not proof of remote rollback. A changed host key
+is refused on reconnect even if the previous unknown key was approved interactively.
+
 SSH.NET supplies ordinary SFTP rename, upload and stream APIs. External writers
 can race the last check and rename, and a retained copy may miss the last
 concurrent edit. This is optimistic synchronization without CAS or exactly-once
@@ -58,7 +65,9 @@ actual SSH authentication, pinned and interactive key decisions, root-bound
 pagination and ranges, stale reads and explicit disabled-root behavior, verified
 uploads, retained originals, empty and multi-frame content, stable operation
 binding, edits with unchanged size/time, read-only refusal and cache cancellation,
-retained moves/deletes, nested directories and empty-only deletion.
+retained moves/deletes, nested directories and empty-only deletion, actual
+disconnects, Worker restart, damaged proof, publication cancellation and key
+rotation during readback.
 
 Protected signed v2 publication and production Host acceptance are subsequent
 acceptance gates. The current source tests do not establish those gates.

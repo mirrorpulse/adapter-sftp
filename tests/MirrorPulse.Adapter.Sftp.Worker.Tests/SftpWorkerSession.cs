@@ -16,6 +16,7 @@ internal sealed class SftpWorkerSession : IAsyncDisposable
     private readonly Guid _session = Guid.NewGuid();
     private readonly CancellationTokenSource _deadline = new(TimeSpan.FromSeconds(90));
     private int _protocol = 1;
+    private bool _ownsSources;
     public SftpServerFixture Left { get; private set; } = null!;
     public SftpServerFixture Right { get; private set; } = null!;
 
@@ -63,14 +64,17 @@ internal sealed class SftpWorkerSession : IAsyncDisposable
     public List<string> ChallengeRoots { get; } = [];
 
     public static async Task<SftpWorkerSession> StartAsync(bool unknownKeys = false, bool rejectHostKey = false,
-        bool wrongDecisionRoot = false, bool wrongCredential = false, string mutationPolicy = "Optimistic")
+        bool wrongDecisionRoot = false, bool wrongCredential = false, string mutationPolicy = "Optimistic",
+        SftpServerFixture? left = null, SftpServerFixture? right = null)
     {
         string root = Path.Combine(Path.GetTempPath(), "mp-sftp-v2-" + Guid.NewGuid().ToString("N"));
         var session = new SftpWorkerSession(root);
         try
         {
-            session.Left = await SftpServerFixture.StartAsync("left");
-            session.Right = await SftpServerFixture.StartAsync("right");
+            if ((left is null) != (right is null)) throw new ArgumentException("Both source fixtures are required.");
+            session._ownsSources = left is null;
+            session.Left = left ?? await SftpServerFixture.StartAsync("left");
+            session.Right = right ?? await SftpServerFixture.StartAsync("right");
             await session._pipe.WaitForConnectionAsync(session._deadline.Token);
             AdapterControlFrame hello = await session.ReadAsync();
             Assert.AreEqual("Hello", hello.MessageType);
@@ -247,8 +251,8 @@ internal sealed class SftpWorkerSession : IAsyncDisposable
     {
         if (!_process.HasExited) { _process.Kill(entireProcessTree: true); await _process.WaitForExitAsync(); }
         _process.Dispose();
-        if (Left is not null) await Left.DisposeAsync();
-        if (Right is not null) await Right.DisposeAsync();
+        if (_ownsSources && Left is not null) await Left.DisposeAsync();
+        if (_ownsSources && Right is not null) await Right.DisposeAsync();
         await _pipe.DisposeAsync();
         _deadline.Dispose();
         Directory.Delete(Root, recursive: true);

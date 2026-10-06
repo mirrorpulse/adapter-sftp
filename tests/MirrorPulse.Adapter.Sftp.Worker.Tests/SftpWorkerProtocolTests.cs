@@ -313,6 +313,168 @@ public sealed class SftpWorkerProtocolTests
         }
     }
 
+    [TestMethod]
+    public async Task ActualDisconnectAfterPublicationReconcilesWithoutPublishingTwice()
+    {
+        await using var session = await SftpWorkerSession.StartAsync();
+        string revision = (await session.RequestAsync("Stat", new { rootKey = "left", path = "same.txt" })).Payload.GetProperty("revision").GetString()!;
+        Guid operation = Guid.NewGuid();
+        byte[] content = Encoding.UTF8.GetBytes("disconnected publication");
+        session.Left.Fault("drop-publish-ack");
+        AssertCode("MutationOutcomeAmbiguous", await session.UploadAsync("left", "same.txt", content, operation, new(revision, false)));
+        CollectionAssert.AreEqual(content, session.Left.ReadStoredFile("/same.txt"));
+        Assert.AreEqual("UploadComplete", (await session.UploadAsync("left", "same.txt", content, operation, new(revision, false))).MessageType);
+        Assert.AreEqual(1, session.Left.PublishedUploads);
+        CollectionAssert.AreEqual(Encoding.UTF8.GetBytes("left"), session.Left.ReadStoredFile("/.mp-recovery-" + operation.ToString("N")));
+        await AssertCacheClearedAsync(session);
+    }
+
+    [TestMethod]
+    public async Task RestartedWorkersRecoverRemoteProofAndRefuseAlteredBindingsAndTargets()
+    {
+        await using var left = await SftpServerFixture.StartAsync("left");
+        await using var right = await SftpServerFixture.StartAsync("right");
+        Guid operation = Guid.NewGuid();
+        byte[] content = Encoding.UTF8.GetBytes("restart recovery");
+        string revision, originalCache;
+        await using (var first = await SftpWorkerSession.StartAsync(left: left, right: right))
+        {
+            revision = (await first.RequestAsync("Stat", new { rootKey = "left", path = "same.txt" })).Payload.GetProperty("revision").GetString()!;
+            left.Fault("fail-publication");
+            AssertCode("MutationOutcomeAmbiguous", await first.UploadAsync("left", "same.txt", content, operation, new(revision, false)));
+            originalCache = first.Cache;
+        }
+        Assert.IsFalse(Directory.Exists(originalCache));
+        await using (var second = await SftpWorkerSession.StartAsync(left: left, right: right))
+        {
+            AssertCode("OperationBindingMismatch", await second.UploadAsync("left", "same.txt", [1], operation, new(revision, false)));
+            Assert.AreEqual("UploadComplete", (await second.UploadAsync("left", "same.txt", content, operation, new(revision, false))).MessageType);
+            await AssertCacheClearedAsync(second);
+        }
+        await using (var third = await SftpWorkerSession.StartAsync(left: left, right: right))
+        {
+            Assert.AreEqual("UploadComplete", (await third.UploadAsync("left", "same.txt", content, operation, new(revision, false))).MessageType);
+            Assert.AreEqual(1, left.PublishedUploads);
+            left.ReplaceStoredFile("/same.txt", Encoding.UTF8.GetBytes("external version"));
+            AssertCode("RemoteConflict", await third.UploadAsync("left", "same.txt", content, operation, new(revision, false)));
+            CollectionAssert.AreEqual(Encoding.UTF8.GetBytes("external version"), left.ReadStoredFile("/same.txt"));
+            CollectionAssert.AreEqual(Encoding.UTF8.GetBytes("left"), left.ReadStoredFile("/.mp-recovery-" + operation.ToString("N")));
+            CollectionAssert.AreEqual(Encoding.UTF8.GetBytes("right"), right.ReadStoredFile("/same.txt"));
+        }
+    }
+
+    [TestMethod]
+    public async Task CorruptOrOversizedRemoteProofRefusesMutationAndPreservesSourceContent()
+    {
+        await using var session = await SftpWorkerSession.StartAsync();
+        foreach (byte[] proof in new[] { Encoding.UTF8.GetBytes("null"), Encoding.UTF8.GetBytes("{}"), new byte[64 * 1024 + 1] })
+        {
+            Guid operation = Guid.NewGuid();
+            string journal = ".mp-journal-" + operation.ToString("N");
+            session.Left.ReplaceStoredFile("/" + journal, proof);
+            AdapterControlFrame error = await session.UploadAsync("left", "same.txt", [1], operation);
+            AssertCode("MutationOutcomeAmbiguous", error);
+            Assert.AreEqual(journal, error.Payload.GetProperty("recoveryRelativePath").GetString());
+            CollectionAssert.AreEqual(Encoding.UTF8.GetBytes("left"), session.Left.ReadStoredFile("/same.txt"));
+            Assert.AreEqual(0, session.Left.PublishedUploads);
+            Assert.AreEqual("right", Encoding.UTF8.GetString(await session.ReadRangeAsync("right", "same.txt", 5)));
+        }
+    }
+
+    [TestMethod]
+    public async Task LostNamespaceResponsesRecoverAfterWorkerRestartAndProtectRecreatedFiles()
+    {
+        await using var left = await SftpServerFixture.StartAsync("left");
+        await using var right = await SftpServerFixture.StartAsync("right");
+        AdapterOperationRequest move, delete;
+        await using (var first = await SftpWorkerSession.StartAsync(left: left, right: right))
+        {
+            string revision = (await first.RequestAsync("Stat", new { rootKey = "left", path = "same.txt" })).Payload.GetProperty("revision").GetString()!;
+            move = new(Guid.NewGuid(), "left", "same.txt", "left", "moved.txt", new(revision));
+            left.Fault("drop-rename-ack");
+            AssertCode("MutationOutcomeAmbiguous", await first.RequestAsync("Move", move));
+        }
+        await using (var second = await SftpWorkerSession.StartAsync(left: left, right: right))
+        {
+            AdapterControlFrame moved = await second.RequestAsync("Move", move);
+            Assert.AreEqual("MutationComplete", moved.MessageType, moved.Payload.GetRawText());
+            delete = new(Guid.NewGuid(), "left", "moved.txt", Preconditions: new(moved.Payload.GetProperty("revision").GetString()));
+            left.Fault("drop-rename-ack");
+            AssertCode("MutationOutcomeAmbiguous", await second.RequestAsync("Delete", delete));
+        }
+        await using (var third = await SftpWorkerSession.StartAsync(left: left, right: right))
+        {
+            Assert.AreEqual("MutationComplete", (await third.RequestAsync("Delete", delete)).MessageType);
+            int commands = left.MutationCommands.Count;
+            left.ReplaceStoredFile("/same.txt", Encoding.UTF8.GetBytes("external source"));
+            left.ReplaceStoredFile("/moved.txt", Encoding.UTF8.GetBytes("external target"));
+            AssertCode("RemoteConflict", await third.RequestAsync("Move", move));
+            AssertCode("RemoteConflict", await third.RequestAsync("Delete", delete));
+            Assert.HasCount(commands, left.MutationCommands);
+            CollectionAssert.AreEqual(Encoding.UTF8.GetBytes("left"), left.ReadStoredFile("/.mp-recovery-" + move.OperationId.ToString("N")));
+            CollectionAssert.AreEqual(Encoding.UTF8.GetBytes("left"), left.ReadStoredFile("/.mp-recovery-" + delete.OperationId.ToString("N")));
+        }
+    }
+
+    [TestMethod]
+    public async Task CancelDuringPublicationRetainsUnknownResultUntilStableReadback()
+    {
+        await using var session = await SftpWorkerSession.StartAsync();
+        string revision = (await session.RequestAsync("Stat", new { rootKey = "left", path = "same.txt" })).Payload.GetProperty("revision").GetString()!;
+        Guid request = Guid.NewGuid(), stream = Guid.NewGuid(), operation = Guid.NewGuid(), cancel = Guid.NewGuid();
+        byte[] content = Encoding.UTF8.GetBytes("published before cancel");
+        session.Left.Fault("pause-publish");
+        session.Left.Fault("drop-publish-ack");
+        await session.SendAsync("Upload", request, new
+        {
+            rootKey = "left",
+            path = "same.txt",
+            operationId = operation,
+            streamId = stream,
+            length = content.Length,
+            preconditions = new AdapterMutationPreconditions(revision, false)
+        });
+        Assert.AreEqual("UploadReady", (await session.ReadAsync()).MessageType);
+        await session.SendChunkAsync(request, stream, "left", 0, content, true);
+        Task? sendCancel = null;
+        string signal = Path.Combine(session.Left.Storage, ".fixture-publication-reached");
+        try
+        {
+            for (int attempt = 0; attempt < 100 && !File.Exists(signal); attempt++) await Task.Delay(50);
+            Assert.IsTrue(File.Exists(signal));
+            sendCancel = session.SendAsync("Cancel", cancel, new { rootKey = "left", targetRequestId = request, operationId = operation });
+        }
+        finally { File.Delete(Path.Combine(session.Left.Storage, ".fixture-pause-publish")); }
+        AdapterControlFrame unknown = await session.ReadAsync();
+        Assert.AreEqual(request, unknown.RequestId);
+        AssertCode("MutationOutcomeAmbiguous", unknown);
+        await sendCancel!;
+        AdapterControlFrame ack = await session.ReadAsync();
+        Assert.AreEqual(cancel, ack.RequestId);
+        Assert.AreEqual("alreadyCompleted", ack.Payload.GetProperty("status").GetString());
+        Assert.AreEqual("UploadComplete", (await session.UploadAsync("left", "same.txt", content, operation, new(revision, false))).MessageType);
+        Assert.AreEqual(1, session.Left.PublishedUploads);
+        CollectionAssert.AreEqual(content, session.Left.ReadStoredFile("/same.txt"));
+        await AssertCacheClearedAsync(session);
+    }
+
+    [TestMethod]
+    public async Task AReconnectCannotApproveAChangedPreviouslyAcceptedHostKey()
+    {
+        await using var session = await SftpWorkerSession.StartAsync(unknownKeys: true);
+        string revision = (await session.RequestAsync("Stat", new { rootKey = "left", path = "same.txt" })).Payload.GetProperty("revision").GetString()!;
+        Guid operation = Guid.NewGuid();
+        byte[] content = Encoding.UTF8.GetBytes("published before key change");
+        session.Left.Fault("drop-publish-ack");
+        AssertCode("MutationOutcomeAmbiguous", await session.UploadAsync("left", "same.txt", content, operation, new(revision, false)));
+        session.Left.Fault("rotate-host-key");
+        AssertCode("HostKeyRejected", await session.UploadAsync("left", "same.txt", content, operation, new(revision, false)));
+        Assert.AreEqual(1, session.Left.PublishedUploads);
+        CollectionAssert.AreEqual(content, session.Left.ReadStoredFile("/same.txt"));
+        CollectionAssert.AreEqual(Encoding.UTF8.GetBytes("left"), session.Left.ReadStoredFile("/.mp-recovery-" + operation.ToString("N")));
+        Assert.AreEqual("right", Encoding.UTF8.GetString(await session.ReadRangeAsync("right", "same.txt", 5)));
+    }
+
     private static void AssertCode(string code, AdapterControlFrame response)
     {
         Assert.AreEqual("OperationError", response.MessageType, response.Payload.GetRawText());

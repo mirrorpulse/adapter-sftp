@@ -165,11 +165,29 @@ class Storage(paramiko.SFTPServerInterface):
     def rename(self, oldpath, newpath):
         try:
             self._record("RENAME", oldpath + " " + newpath)
+            publishing = posixpath.basename(oldpath).startswith(".mp-stage-")
+            failure = os.path.join(self.root, ".fixture-fail-publication")
+            if publishing and os.path.exists(failure):
+                os.unlink(failure)
+                return paramiko.SFTP_FAILURE
             # Windows rename refuses an existing destination, matching SFTP v3.
             # Only the separate POSIX extension is allowed to replace a target.
             os.rename(self._local(oldpath), self._local(newpath))
-            if posixpath.basename(oldpath).startswith(".mp-stage-"):
+            if publishing:
                 self._record("PUBLISH", newpath)
+                gate = os.path.join(self.root, ".fixture-pause-publish")
+                if os.path.exists(gate):
+                    with open(os.path.join(self.root, ".fixture-publication-reached"), "w", encoding="utf-8") as signal:
+                        signal.write("published")
+                    deadline = time.monotonic() + 20
+                    while os.path.exists(gate) and time.monotonic() < deadline:
+                        time.sleep(0.01)
+            for name in ("drop-rename-ack", "drop-publish-ack" if publishing else "unused"):
+                fault = os.path.join(self.root, ".fixture-" + name)
+                if os.path.exists(fault):
+                    os.unlink(fault)
+                    self.server.transport.close()
+                    return paramiko.SFTP_FAILURE
             return paramiko.SFTP_OK
         except OSError as error:
             return paramiko.SFTPServer.convert_errno(error.errno)
@@ -209,6 +227,10 @@ def main():
     print(json.dumps({"port": listener.getsockname()[1], "sha256": fingerprint}), flush=True)
     while True:
         connection, _ = listener.accept()
+        rotate = os.path.join(root, ".fixture-rotate-host-key")
+        if os.path.exists(rotate):
+            os.unlink(rotate)
+            host_key = paramiko.RSAKey.generate(2048)
         threading.Thread(target=serve_connection, args=(connection, host_key, root, label), daemon=True).start()
 
 
