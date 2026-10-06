@@ -60,6 +60,10 @@ class Storage(paramiko.SFTPServerInterface):
         self.server = server
         self.root = kwargs["root"]
 
+    def _record(self, action, path):
+        with open(os.path.join(self.root, ".fixture-mutations.log"), "a", encoding="utf-8") as output:
+            output.write(action + " " + path + "\n")
+
     def _local(self, path):
         normalized = posixpath.normpath("/" + path).lstrip("/")
         if os.path.exists(os.path.join(self.root, ".fixture-canonical-parent")):
@@ -106,7 +110,7 @@ class Storage(paramiko.SFTPServerInterface):
                 attributes.filename = name
                 entries.append(attributes)
             for name in os.listdir(self._local(path)):
-                if name == ".fixture-canonical-parent":
+                if name.startswith(".fixture-"):
                     continue
                 local = os.path.join(self._local(path), name)
                 attributes = paramiko.SFTPAttributes.from_stat(os.lstat(local))
@@ -118,6 +122,8 @@ class Storage(paramiko.SFTPServerInterface):
 
     def open(self, path, flags, attr):
         try:
+            if flags & (os.O_WRONLY | os.O_RDWR):
+                self._record("WRITE", path)
             if flags & (os.O_WRONLY | os.O_RDWR) and os.path.exists(os.path.join(self.root, "fail-first-write")):
                 os.unlink(os.path.join(self.root, "fail-first-write"))
                 self.server.transport.close()
@@ -142,16 +148,28 @@ class Storage(paramiko.SFTPServerInterface):
 
     def rmdir(self, path):
         try:
+            self._record("RMDIR", path)
             os.rmdir(self._local(path))
+            return paramiko.SFTP_OK
+        except OSError as error:
+            return paramiko.SFTPServer.convert_errno(error.errno)
+
+    def mkdir(self, path, attr):
+        try:
+            self._record("MKDIR", path)
+            os.mkdir(self._local(path))
             return paramiko.SFTP_OK
         except OSError as error:
             return paramiko.SFTPServer.convert_errno(error.errno)
 
     def rename(self, oldpath, newpath):
         try:
+            self._record("RENAME", oldpath + " " + newpath)
             # Windows rename refuses an existing destination, matching SFTP v3.
             # Only the separate POSIX extension is allowed to replace a target.
             os.rename(self._local(oldpath), self._local(newpath))
+            if posixpath.basename(oldpath).startswith(".mp-stage-"):
+                self._record("PUBLISH", newpath)
             return paramiko.SFTP_OK
         except OSError as error:
             return paramiko.SFTPServer.convert_errno(error.errno)

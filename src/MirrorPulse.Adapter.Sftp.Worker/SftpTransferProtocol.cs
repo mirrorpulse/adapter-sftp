@@ -63,6 +63,9 @@ internal sealed class SftpTransferProtocol(AdapterControlChannel channel, Adapte
                         { RootKey = address.RootKey }, token).ConfigureAwait(false);
                         break;
                     case "Upload": await BeginUploadAsync(command, address, root, token).ConfigureAwait(false); break;
+                    case "Move":
+                    case "Delete":
+                    case "CreateDirectory": await MutateAsync(command, root, token).ConfigureAwait(false); break;
                     default: throw new InvalidDataException("ConditionalMutationUnavailable");
                 }
             }
@@ -109,6 +112,24 @@ internal sealed class SftpTransferProtocol(AdapterControlChannel channel, Adapte
     {
         if (_bindings.TryGetValue(operation, out string? previous) && previous != fingerprint)
             throw new InvalidDataException("OperationBindingMismatch");
+    }
+
+    private async Task MutateAsync(AdapterControlFrame command, SftpWorkerRoot root, CancellationToken token)
+    {
+        AdapterOperationRequest operation;
+        if (command.MessageType == "CreateDirectory")
+        {
+            AdapterCreateDirectoryRequest create = AdapterProtocolJson.Decode<AdapterCreateDirectoryRequest>(Encoding.UTF8.GetBytes(command.Payload.GetRawText()));
+            operation = new(create.OperationId, create.RootKey, create.Path, Preconditions: new(null, create.MustBeAbsent), IsDirectory: true);
+        }
+        else operation = AdapterProtocolJson.Decode<AdapterOperationRequest>(Encoding.UTF8.GetBytes(command.Payload.GetRawText()));
+        AdapterProtocolJson.ValidateMutation(operation, requiresDestination: command.MessageType == "Move");
+        if (_uploads.Values.Any(upload => upload.Operation.OperationId == operation.OperationId)) throw new InvalidDataException("OperationInProgress");
+        string fingerprint = SftpNamespaceOperations.Fingerprint(command.MessageType, operation);
+        CheckOperationBinding(operation.OperationId, fingerprint);
+        string? revision = await SftpNamespaceOperations.MutateAsync(command.MessageType, root, operation, cache,
+            () => BindOperation(operation.OperationId, fingerprint), token).ConfigureAwait(false);
+        await ReplyAsync(command, "MutationComplete", new { rootKey = operation.RootKey, operationId = operation.OperationId, revision }, token).ConfigureAwait(false);
     }
 
     private async Task ReceiveAsync(AdapterBinaryChunk chunk, CancellationToken token)

@@ -9,6 +9,16 @@ internal sealed class SftpServerFixture(Process process, string storage, int por
     public int Port { get; } = port;
     public string Fingerprint { get; } = fingerprint;
     public string Label { get; } = label;
+    public IReadOnlyList<string> MutationCommands => File.Exists(Path.Combine(Storage, ".fixture-mutations.log"))
+        ? File.ReadAllLines(Path.Combine(Storage, ".fixture-mutations.log")) : [];
+    public byte[]? ReadStoredFile(string path)
+    {
+        string local = Path.Combine(Storage, path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
+        return File.Exists(local) ? File.ReadAllBytes(local) : null;
+    }
+    public void ReplaceStoredFile(string path, byte[] content) =>
+        File.WriteAllBytes(Path.Combine(Storage, path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)), content);
+    public bool HasDirectory(string path) => Directory.Exists(Path.Combine(Storage, path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)));
 
     public static async Task<SftpServerFixture> StartAsync(string label)
     {

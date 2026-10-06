@@ -50,6 +50,6 @@ try {
     [ordered]@{ schemaVersion = 1; runtime = $native; version = '0.1.0'; protocolVersion = 2;
         packageLength = (Get-Item -LiteralPath $package).Length;
         packageSha256 = (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash.ToLowerInvariant();
-        privateRuntimeVerified = $true; conformanceCasesPassed = 15; signing = 'disposable'; published = $false
+        privateRuntimeVerified = $true; conformanceCasesPassed = 18; signing = 'disposable'; published = $false
     } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path (Split-Path $package) 'native-conformance.json') -Encoding utf8
 } finally { $env:MP_RELEASE_VERSION = $previous; $env:MP_RELEASE_EVENT = $previousEvent }

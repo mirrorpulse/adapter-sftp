@@ -55,6 +55,9 @@ internal static class SftpOperations
         return current;
     }
 
+    public static async Task<ISftpFile[]> ReadDirectoryAsync(SftpWorkerRoot root, string relative, CancellationToken token) =>
+        await ReadListingAsync(root, await DirectoryAsync(root, relative, token).ConfigureAwait(false), token).ConfigureAwait(false);
+
     public static async Task<string?> RevisionAsync(SftpWorkerRoot root, string relative, CancellationToken token)
     {
         _ = SftpPathPolicy.Resolve(root.Configuration.Endpoint, relative);

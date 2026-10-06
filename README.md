@@ -27,8 +27,11 @@ compare-and-swap guarantee or a content snapshot. File uploads use the SDK
 transfer lease, sibling staging, full-content readback and checks before
 publication. Each root accepts `mutationPolicy` as `Optimistic` (default) or
 `ReadOnly`. Invalid policies fail before credential requests. Read-only roots
-refuse uploads before receiving bytes. Namespace mutations currently return
-`ConditionalMutationUnavailable` until their separate recovery profile passes.
+refuse uploads before receiving bytes or namespace mutations before commands.
+Same-root file moves retain a verified copy; deletion renames the source to its
+recovery name. Directory creation and empty-directory deletion use mature
+nonrecursive APIs. Existing move destinations, cross-root moves and directory
+tree moves are refused. A directory containing recovery evidence is not empty.
 
 An existing file is retained under `.mp-recovery-<operationId>` before the
 verified stage is renamed into place. `.mp-stage-<operationId>` and
@@ -54,7 +57,8 @@ SSH sources with different credentials and keys. The process tests exercise
 actual SSH authentication, pinned and interactive key decisions, root-bound
 pagination and ranges, stale reads and explicit disabled-root behavior, verified
 uploads, retained originals, empty and multi-frame content, stable operation
-binding, edits with unchanged size/time, read-only refusal and cache cancellation.
+binding, edits with unchanged size/time, read-only refusal and cache cancellation,
+retained moves/deletes, nested directories and empty-only deletion.
 
 Protected signed v2 publication and production Host acceptance are subsequent
 acceptance gates. The current source tests do not establish those gates.
