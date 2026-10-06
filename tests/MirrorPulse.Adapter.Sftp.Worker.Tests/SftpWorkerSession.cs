@@ -11,9 +11,10 @@ internal sealed class SftpWorkerSession : IAsyncDisposable
 {
     private readonly NamedPipeServerStream _pipe;
     private readonly Process _process;
+    private readonly Task<string> _standardError;
     private readonly Guid _instance = Guid.NewGuid();
     private readonly Guid _session = Guid.NewGuid();
-    private readonly CancellationTokenSource _deadline = new(TimeSpan.FromSeconds(30));
+    private readonly CancellationTokenSource _deadline = new(TimeSpan.FromSeconds(90));
     private int _protocol = 1;
     public SftpServerFixture Left { get; private set; } = null!;
     public SftpServerFixture Right { get; private set; } = null!;
@@ -29,7 +30,7 @@ internal sealed class SftpWorkerSession : IAsyncDisposable
         string executable = configuredWorker ?? Path.Combine(FindRepository(), "src", "MirrorPulse.Adapter.Sftp.Worker", "bin", "Release",
             "net10.0-windows", "MirrorPulse.Adapter.Sftp.Worker.exe");
         var start = new ProcessStartInfo(executable)
-        { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(executable)! };
+        { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, WorkingDirectory = Path.GetDirectoryName(executable)! };
         start.Environment.Clear();
         string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         start.Environment["SystemRoot"] = windows;
@@ -51,6 +52,7 @@ internal sealed class SftpWorkerSession : IAsyncDisposable
             start.Environment["PATH"] = Environment.SystemDirectory;
         }
         _process = Process.Start(start) ?? throw new InvalidOperationException("Worker launch failed.");
+        _standardError = _process.StandardError.ReadToEndAsync();
     }
 
     public List<string> CredentialRoots { get; } = [];
@@ -61,7 +63,7 @@ internal sealed class SftpWorkerSession : IAsyncDisposable
     public List<string> ChallengeRoots { get; } = [];
 
     public static async Task<SftpWorkerSession> StartAsync(bool unknownKeys = false, bool rejectHostKey = false,
-        bool wrongDecisionRoot = false, bool wrongCredential = false)
+        bool wrongDecisionRoot = false, bool wrongCredential = false, string mutationPolicy = "Optimistic")
     {
         string root = Path.Combine(Path.GetTempPath(), "mp-sftp-v2-" + Guid.NewGuid().ToString("N"));
         var session = new SftpWorkerSession(root);
@@ -82,6 +84,7 @@ internal sealed class SftpWorkerSession : IAsyncDisposable
                     ["username"] = "user-" + fixture.Label,
                     ["credentialReference"] = fixture.Label + "-credential"
                 };
+                values["mutationPolicy"] = mutationPolicy;
                 if (!unknownKeys) values["trustedHostKeySha256"] = rejectHostKey ? new string('A', 43) : fixture.Fingerprint;
                 return values;
             }
@@ -121,8 +124,10 @@ internal sealed class SftpWorkerSession : IAsyncDisposable
                     secret = wrongCredential ? "wrong-fixture-secret" : "secret-" + key
                 }, response: true);
             }
-            if (!rejectHostKey && !wrongDecisionRoot && !wrongCredential) Assert.AreEqual("Connected", session.StartupFrame.MessageType);
-            if (Environment.GetEnvironmentVariable("MP_SFTP_TEST_WORKER_EXE") is { } executable)
+            if (!rejectHostKey && !wrongDecisionRoot && !wrongCredential && mutationPolicy is "Optimistic" or "ReadOnly")
+                Assert.AreEqual("Connected", session.StartupFrame.MessageType);
+            if (session.StartupFrame.MessageType == "Connected" &&
+                Environment.GetEnvironmentVariable("MP_SFTP_TEST_WORKER_EXE") is { } executable)
             {
                 string privateRuntime = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(executable)!, "coreclr.dll"));
                 ProcessModule[] modules = session._process.Modules.Cast<ProcessModule>().ToArray();
@@ -217,7 +222,12 @@ internal sealed class SftpWorkerSession : IAsyncDisposable
     private async Task<byte[]> ReadFrameAsync()
     {
         byte[] prefix = new byte[4];
-        await _pipe.ReadExactlyAsync(prefix, _deadline.Token);
+        try { await _pipe.ReadExactlyAsync(prefix, _deadline.Token); }
+        catch (EndOfStreamException)
+        {
+            await _process.WaitForExitAsync(_deadline.Token);
+            throw new InvalidOperationException("The disposable Worker exited: " + await _standardError);
+        }
         uint length = BinaryPrimitives.ReadUInt32LittleEndian(prefix);
         Assert.IsTrue(length is > 0 and <= 2 * 1024 * 1024);
         byte[] payload = new byte[checked((int)length)];

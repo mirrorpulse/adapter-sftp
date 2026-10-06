@@ -18,7 +18,7 @@ foreach ($project in $projects) {
 if ($LASTEXITCODE -ne 0) { throw 'Actual SFTP conformance failed.' }
 [xml]$trx = Get-Content -LiteralPath artifacts/test-results/sftp-v2.trx -Raw
 $counts = $trx.TestRun.ResultSummary.Counters
-if ($counts.total -ne 9 -or $counts.executed -ne 9 -or $counts.passed -ne 9 -or $counts.notExecuted -ne 0) {
+if ($counts.total -ne 15 -or $counts.executed -ne 15 -or $counts.passed -ne 15 -or $counts.notExecuted -ne 0) {
     throw 'All SFTP source cases must execute without skips.'
 }
 & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'verify-adapter-version.ps1')

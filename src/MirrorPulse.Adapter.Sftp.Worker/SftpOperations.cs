@@ -14,6 +14,7 @@ internal static class SftpOperations
 
     private static async Task<ISftpFile[]> ReadListingAsync(SftpWorkerRoot root, string path, CancellationToken token)
     {
+        await root.EnsureConnectedAsync(token).ConfigureAwait(false);
         ISftpFile directory = await root.Client.GetAsync(path, token).ConfigureAwait(false);
         if (!directory.IsDirectory || directory.IsSymbolicLink || directory.FullName.Length is < 1 or > 8192)
             throw new InvalidDataException("DirectoryEnumerationIncomplete");
@@ -61,7 +62,7 @@ internal static class SftpOperations
         {
             ISftpFile[] children = await ReadListingAsync(root, await DirectoryAsync(root, "", token).ConfigureAwait(false), token).ConfigureAwait(false);
             return "sftp-directory:" + Convert.ToHexString(SHA256.HashData(AdapterProtocolJson.Encode(
-                children.Select(item => new { item.Name, revision = Revision(item) }))));
+                children.Where(item => !SftpUploadOperations.IsPrivateName(item.Name)).Select(item => new { item.Name, revision = Revision(item) }))));
         }
         int separator = relative.LastIndexOf('/');
         string parent = separator < 0 ? "" : relative[..separator];
@@ -90,6 +91,7 @@ internal static class SftpOperations
         }
         string directory = await DirectoryAsync(root, address.Path, token).ConfigureAwait(false);
         ISftpFile[] children = await ReadListingAsync(root, directory, token).ConfigureAwait(false);
+        children = children.Where(item => !SftpUploadOperations.IsPrivateName(item.Name)).ToArray();
         if (offset > children.Length) throw new InvalidDataException("InvalidCursor");
         var entries = new List<object>();
         foreach (ISftpFile item in children.Skip(offset).Take(size))

@@ -23,7 +23,18 @@ public sealed record SftpWorkerConfiguration(Uri Endpoint, string Username,
 }
 
 internal sealed record SftpWorkerRoot(string Key, SftpWorkerConfiguration Configuration, SftpClient Client,
-    string HostKeySha256);
+    string HostKeySha256, bool AllowsMutations)
+{
+    private bool _requiresReconnect;
+    public void RequireReconnect() => _requiresReconnect = true;
+    public async Task EnsureConnectedAsync(CancellationToken token)
+    {
+        if (!_requiresReconnect && Client.IsConnected) return;
+        Client.Disconnect();
+        await Client.ConnectAsync(token).ConfigureAwait(false);
+        _requiresReconnect = false;
+    }
+}
 
 internal sealed class SftpWorkerRoots : IDisposable
 {
@@ -38,6 +49,8 @@ internal sealed class SftpWorkerRoots : IDisposable
             foreach (AdapterRootBinding binding in ready.Roots)
             {
                 if (!binding.Enabled) { roots._roots.Add(binding.RootKey, null); continue; }
+                string mutationPolicy = binding.Configuration.GetValueOrDefault("mutationPolicy") ?? "Optimistic";
+                if (mutationPolicy is not ("Optimistic" or "ReadOnly")) throw new InvalidDataException("InvalidMutationPolicy");
                 var configuration = new SftpWorkerConfiguration(
                     new Uri(binding.Configuration.GetValueOrDefault("endpoint") ?? throw new InvalidDataException("EndpointRequired")),
                     binding.Configuration.GetValueOrDefault("username") ?? throw new InvalidDataException("UsernameRequired"),
@@ -62,7 +75,9 @@ internal sealed class SftpWorkerRoots : IDisposable
                 {
                     string fingerprint = key.FingerPrintSHA256;
                     key.CanTrust = false;
-                    if (configuration.TrustedHostKeySha256 is not null)
+                    if (accepted is not null)
+                        key.CanTrust = accepted == fingerprint;
+                    else if (configuration.TrustedHostKeySha256 is not null)
                         key.CanTrust = configuration.TrustedHostKeySha256 == fingerprint;
                     else
                     {
@@ -95,7 +110,7 @@ internal sealed class SftpWorkerRoots : IDisposable
                 {
                     await client.ConnectAsync(token).ConfigureAwait(false);
                     roots._roots.Add(binding.RootKey, new(binding.RootKey, configuration, client,
-                        accepted ?? throw new InvalidDataException("HostKeyRejected")));
+                        accepted ?? throw new InvalidDataException("HostKeyRejected"), mutationPolicy == "Optimistic"));
                 }
                 catch (Exception) when (rejected) { client.Dispose(); throw new InvalidDataException("HostKeyRejected"); }
                 catch { client.Dispose(); throw; }
@@ -107,6 +122,11 @@ internal sealed class SftpWorkerRoots : IDisposable
 
     public SftpWorkerRoot Get(string key) => !_roots.TryGetValue(key, out SftpWorkerRoot? root)
         ? throw new InvalidDataException("UnknownRoot") : root ?? throw new InvalidDataException("RootOffline");
+
+    public void RequireReconnect(string key)
+    {
+        if (_roots.TryGetValue(key, out SftpWorkerRoot? root)) root?.RequireReconnect();
+    }
 
     public object ConnectedPayload => new
     {

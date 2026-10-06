@@ -32,8 +32,26 @@ class Authentication(paramiko.ServerInterface):
 
 
 class FileHandle(paramiko.SFTPHandle):
+    def __init__(self, flags, path, root):
+        super().__init__(flags)
+        self.path = path
+        self.root = root
+
     def stat(self):
         return paramiko.SFTPAttributes.from_stat(os.fstat(self.readfile.fileno()))
+
+    def close(self):
+        super().close()
+        injected = os.path.join(self.root, ".fixture-edit-after-stage.json")
+        if posixpath.basename(self.path).startswith(".mp-stage-") and os.path.exists(injected):
+            with open(injected, encoding="utf-8") as source:
+                edit = json.load(source)
+            os.unlink(injected)
+            target = os.path.join(self.root, edit["path"])
+            before = os.stat(target)
+            with open(target, "wb") as output:
+                output.write(edit["content"].encode("utf-8"))
+            os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns))
 
 
 class Storage(paramiko.SFTPServerInterface):
@@ -107,7 +125,7 @@ class Storage(paramiko.SFTPServerInterface):
             local = self._local(path)
             descriptor = os.open(local, flags, 0o600)
             mode = "r+b" if flags & os.O_RDWR else "wb" if flags & os.O_WRONLY else "rb"
-            handle = FileHandle(flags)
+            handle = FileHandle(flags, path, self.root)
             stream = os.fdopen(descriptor, mode, buffering=0)
             handle.readfile = stream
             handle.writefile = stream

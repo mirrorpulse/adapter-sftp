@@ -15,6 +15,6 @@ foreach (MethodInfo method in type.GetMethods().Where(method => method.GetCustom
     count++;
     Console.WriteLine("Passed: " + method.Name);
 }
-if (count != 9) throw new InvalidDataException("The complete SFTP conformance profile must execute without skips.");
+if (count != 15) throw new InvalidDataException("The complete SFTP conformance profile must execute without skips.");
 Console.WriteLine("SFTP conformance passed with the Worker private runtime: " + count);
 return 0;

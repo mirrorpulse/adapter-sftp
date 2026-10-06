@@ -23,9 +23,28 @@ concurrent server namespace changes.
 
 The read path checks the requested metadata revision before and after transfer.
 Size and modification time form an observation token, not a server-side
-compare-and-swap guarantee or a content snapshot. Mutations currently return
-`ConditionalMutationUnavailable` while safe publication and recovery are being
-implemented. Existing files are never overwritten based on a stat precheck.
+compare-and-swap guarantee or a content snapshot. File uploads use the SDK
+transfer lease, sibling staging, full-content readback and checks before
+publication. Each root accepts `mutationPolicy` as `Optimistic` (default) or
+`ReadOnly`. Invalid policies fail before credential requests. Read-only roots
+refuse uploads before receiving bytes. Namespace mutations currently return
+`ConditionalMutationUnavailable` until their separate recovery profile passes.
+
+An existing file is retained under `.mp-recovery-<operationId>` before the
+verified stage is renamed into place. `.mp-stage-<operationId>` and
+`.mp-journal-<operationId>` are also reserved; these names are not projected in
+normal directory pages. The remote receipt binds the root, path, preconditions,
+length and content digest. Stable retries verify the result rather than blindly
+republish it. Unknown results retain data and evidence and return
+`MutationOutcomeAmbiguous` with a root-relative recovery path. Retained copies
+and receipts consume remote space; the Worker has no local persistent store.
+Local transfer leases are released after success, failure or receive cancellation.
+
+SSH.NET supplies ordinary SFTP rename, upload and stream APIs. External writers
+can race the last check and rename, and a retained copy may miss the last
+concurrent edit. This is optimistic synchronization without CAS or exactly-once
+guarantees. A broken connection is reconnected before readback; host-key trust
+is checked again against the accepted fingerprint.
 
 ## Verification
 
@@ -33,7 +52,9 @@ Run `pwsh -File eng/setup-test-environment.ps1`, then
 `pwsh -File eng/verify.ps1`. The isolated Paramiko fixture serves two independent
 SSH sources with different credentials and keys. The process tests exercise
 actual SSH authentication, pinned and interactive key decisions, root-bound
-pagination and ranges, stale reads and explicit disabled-root behavior.
+pagination and ranges, stale reads and explicit disabled-root behavior, verified
+uploads, retained originals, empty and multi-frame content, stable operation
+binding, edits with unchanged size/time, read-only refusal and cache cancellation.
 
 Protected signed v2 publication and production Host acceptance are subsequent
 acceptance gates. The current source tests do not establish those gates.
