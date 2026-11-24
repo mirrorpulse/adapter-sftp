@@ -1,0 +1,6 @@
+<Project>
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'MirrorPulse.Core.Tests'">
+    <Compile Include="$(MSBuildThisFileDirectory)SignedSftpPackageFormTests.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../tests/MirrorPulse.Adapter.Sftp.Worker.Tests/SftpServerFixture.cs" />
+  </ItemGroup>
+</Project>
