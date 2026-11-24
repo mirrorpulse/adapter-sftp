@@ -25,7 +25,7 @@ if (Test-Path -LiteralPath $destination) {
     try {
         if ($PackagePath) { Copy-Item -LiteralPath $PackagePath -Destination $temporary }
         else {
-            $url = "https://github.com/MirrorPulse/adapter-template/releases/download/$($pin.tag)/$asset"
+            $url = "https://github.com/mirrorpulse/adapter-sdk/releases/download/$($pin.tag)/$asset"
             Invoke-WebRequest -Uri $url -OutFile $temporary -MaximumRetryCount 3 -RetryIntervalSec 2
         }
         Assert-PinnedPackage $temporary

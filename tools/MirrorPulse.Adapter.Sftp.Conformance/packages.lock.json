@@ -160,7 +160,7 @@
       "mirrorpulse.adapter.sftp.worker": {
         "type": "Project",
         "dependencies": {
-          "MirrorPulse.Adapter.Sdk": "[0.2.1, 0.2.1]",
+          "MirrorPulse.Adapter.Sdk": "[1.0.0, 1.0.0]",
           "SSH.NET": "[2026.0.0, )"
         }
       },
@@ -173,9 +173,9 @@
       },
       "MirrorPulse.Adapter.Sdk": {
         "type": "CentralTransitive",
-        "requested": "[0.2.1, 0.2.1]",
-        "resolved": "0.2.1",
-        "contentHash": "BMMtZiWynLMl+p2/zYjRJKFNaoXlHg/HqNaHqATlokcKcdYPn7hZaSm6/IOsXFrNOzBsz0D6w2ynjlNXdA5Tjw=="
+        "requested": "[1.0.0, 1.0.0]",
+        "resolved": "1.0.0",
+        "contentHash": "dImLOgZbcljos7ejP8dwWGdVqvckNJC6u98A3nKj15IRZF9aL6OYJFvuo4CEIxIo11MMHw9yVytetpSUuZQ/9Q=="
       },
       "MSTest": {
         "type": "CentralTransitive",

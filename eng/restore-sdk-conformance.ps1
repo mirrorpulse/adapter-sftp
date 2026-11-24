@@ -16,7 +16,7 @@ foreach ($asset in $pin.assets) {
         $temporary = Join-Path $destination ([Guid]::NewGuid().ToString('N') + '.download')
         try {
             if ($ArtifactDirectory) { Copy-Item -LiteralPath (Join-Path $ArtifactDirectory $asset.name) -Destination $temporary }
-            else { Invoke-WebRequest -Uri "https://github.com/MirrorPulse/adapter-template/releases/download/$($pin.tag)/$($asset.name)" -OutFile $temporary -MaximumRetryCount 3 -RetryIntervalSec 2 }
+            else { Invoke-WebRequest -Uri "https://github.com/mirrorpulse/adapter-sdk/releases/download/$($pin.tag)/$($asset.name)" -OutFile $temporary -MaximumRetryCount 3 -RetryIntervalSec 2 }
             if ((Get-Item -LiteralPath $temporary).Length -ne $asset.length -or
                 (Get-FileHash -LiteralPath $temporary -Algorithm SHA256).Hash.ToLowerInvariant() -cne $asset.sha256) { throw 'The conformance asset differs from its fixed published hash.' }
             Move-Item -LiteralPath $temporary -Destination $path

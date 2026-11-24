@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup><ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally></PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="MirrorPulse.Adapter.Sdk" Version="[0.2.1]" />
+    <PackageVersion Include="MirrorPulse.Adapter.Sdk" Version="[1.0.0]" />
     <PackageVersion Include="MSTest" Version="4.0.2" />
     <PackageVersion Include="SSH.NET" Version="2026.0.0" />
   </ItemGroup>

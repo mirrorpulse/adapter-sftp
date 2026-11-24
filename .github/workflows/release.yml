@@ -154,7 +154,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: MirrorPulse/MirrorPulse
-          ref: 7f73b90f197f1505839c79c3753965e1e63e95cc
+          ref: 480bb8c4fde430ad136fe9ab3bc63033163ba752
           persist-credentials: false
           path: product
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
@@ -166,9 +166,6 @@ jobs:
           path: provider/artifacts/candidate
       - name: Prepare the real provider SSH fixture
         working-directory: provider
-        run: pwsh ./eng/setup-test-environment.ps1
-      - name: Prepare the real production Host SSH fixture
-        working-directory: product
         run: pwsh ./eng/setup-test-environment.ps1
       - name: Verify the exact signed package in the native runner and production Host
         working-directory: provider

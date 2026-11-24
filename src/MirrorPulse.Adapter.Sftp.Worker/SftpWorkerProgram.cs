@@ -29,7 +29,7 @@ public static class SftpWorkerProgram
             string cache = Environment.GetEnvironmentVariable("MP_TRANSFER_CACHE_DIR") ?? throw new InvalidDataException("TransferCacheRequired");
             using var roots = await SftpWorkerRoots.CreateAsync(ready, channel, cancellationToken).ConfigureAwait(false);
             await using var protocol = new SftpTransferProtocol(channel, arguments, roots, cache);
-            await channel.SendAsync("Connected", helloId, false, roots.ConnectedPayload, cancellationToken).ConfigureAwait(false);
+            await channel.SendAsync("Connected", Guid.NewGuid(), false, roots.ConnectedPayload, cancellationToken).ConfigureAwait(false);
             await protocol.RunAsync(cancellationToken).ConfigureAwait(false);
             return 0;
         }

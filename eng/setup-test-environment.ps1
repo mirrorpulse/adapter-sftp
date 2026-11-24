@@ -23,4 +23,4 @@ if ($LASTEXITCODE -ne 0) { throw "SFTP fixture dependencies are inconsistent." }
 & $fixturePython -c "import paramiko, cryptography; assert paramiko.__version__ == '5.0.0'; assert cryptography.__version__ == '46.0.3'"
 if ($LASTEXITCODE -ne 0) { throw "SFTP fixture dependency preflight failed." }
 
-Write-Output "SFTP fixture environment is ready. Run the Release tests with eng/verify-build.ps1."
+Write-Output "SFTP fixture environment is ready. Run the Release tests with eng/verify.ps1."

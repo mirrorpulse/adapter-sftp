@@ -24,7 +24,7 @@ internal sealed class SftpServerFixture(Process process, string storage, int por
 
     public static async Task<SftpServerFixture> StartAsync(string label)
     {
-        string repository = FindRepository();
+        string repository = Environment.GetEnvironmentVariable("MP_SFTP_FIXTURE_REPOSITORY") ?? FindRepository();
         string python = Environment.GetEnvironmentVariable("MP_SFTP_FIXTURE_PYTHON") ??
             Path.Combine(repository, "artifacts", "test-tools", "sftp", "venv", "Scripts", "python.exe");
         if (!File.Exists(python)) throw new InvalidOperationException("Run eng/setup-test-environment.ps1 first.");
