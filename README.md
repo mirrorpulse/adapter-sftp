@@ -1,16 +1,20 @@
 # MirrorPulse SFTP Adapter
 
-An independent process Worker for the MirrorPulse current-user sync root.
-The v2 development branch uses the fixed published `MirrorPulse.Adapter.Sdk` 0.2.1
-package and SSH.NET 2026.0.0. Historical v1 release assets remain unchanged.
+This optional Adapter connects MirrorPulse to SFTP servers. Install the signed
+`.mpadapter` from this repository's releases in Adapter management or with
+`MirrorPulse adapter install PATH`. The Worker uses the published Adapter SDK
+1.0.0 and SSH.NET 2026.0.0. A deployment declares one root. Install the package
+once and create a separate deployment for each server or folder.
 
 ## Authorized roots and trust
 
-Each enabled root has its own SFTP connection, endpoint, username, credential
-reference and SHA256 host-key pin. Configuration and trust decisions belong to
-MirrorPulse. Disabled roots request no credential and open no connection.
-Unknown keys require a decision bound to the root, request and fingerprint;
-changed pinned keys are rejected. Passwords never appear in ordinary output.
+Enter an `sftp://` folder URL without credentials, a username, and a password
+in the signed deployment form. Paste the server's SHA-256 SSH host key
+fingerprint obtained from its administrator. The form accepts the 43-character
+base64 digest with or without OpenSSH's `SHA256:` prefix. The Worker refuses a
+different key. The Host saves the password and passes an opaque reference
+to the Worker. Each enabled deployment opens its own connection. A disabled
+deployment requests no credential and opens no connection.
 
 Directory pages, stat results and range streams carry the root key. Cursors
 cannot be replayed against a different root or directory. Directory entries are
@@ -69,8 +73,8 @@ retained moves/deletes, nested directories and empty-only deletion, actual
 disconnects, Worker restart, damaged proof, publication cancellation and key
 rotation during readback.
 
-Protected signed v2 publication and production Host acceptance are subsequent
-acceptance gates. The current source tests do not establish those gates.
+Publication additionally requires the signed package and product Host gates
+described below.
 
 ## Package execution
 
@@ -95,10 +99,11 @@ starts from a reviewed `develop` PR merged into `main`, with one `breaking`,
 
 The controller builds once, signs and freezes the source, version and asset
 hashes, then runs the exact candidate on native x64 and ARM64. It consumes fixed
-SDK 0.2.1 assets and the fixed production Host verifier. The Host profile checks
-independent pinned SSH sources, credentials, CfSharp reads, disabled roots,
-private runtime loading, optimistic uploads and stable retries, retained content,
-file moves/deletes, directory creation/empty deletion and read-only root refusal.
+SDK 1.0.0 assets and pins the product Host source. The exact signed Worker
+runs the provider's network suite on both architectures. The product gate
+installs the single-root package, validates the signed form, saves credentials
+through the Host, and verifies a pinned SSH listing, a revision-bound range read
+and stable upload recovery after the Worker restarts.
 Both native profiles must pass against the exact signed candidate before formal
 v2 publication. Signing keys are supplied only to the protected
 signing job and are never read from private files or exported. Existing assets

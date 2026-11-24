@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "adapterId": "com.mirrorpulse.adapter.sftp",
   "publisher": "MirrorPulse",
   "version": "0.1.0",
@@ -16,7 +16,7 @@
   },
   "instancePolicy": {
     "maximumInstances": null,
-    "maximumRootDefinitions": null
+    "maximumRootDefinitions": 1
   },
   "rootDefinitions": [
     {
@@ -41,5 +41,11 @@
       "resourcePath": "locales/en-US.json"
     }
   },
-  "minimumMirrorPulseVersion": "1.0.0"
+  "minimumMirrorPulseVersion": "1.0.0",
+  "presentation": {
+    "titleKey": "adapter.title",
+    "descriptionKey": "adapter.description",
+    "logoPath": "assets/logo.png",
+    "formPath": "forms/config.xml"
+  }
 }

@@ -49,9 +49,13 @@ foreach ($runtime in @('win-x64', 'win-arm64')) {
     }
 }
 Copy-AdapterDependencyNotices -AssetsPath $assetsPath -PackageRoot $packageRoot
-New-Item -ItemType Directory -Path (Join-Path $packageRoot 'locales') -Force | Out-Null
+foreach ($relative in @($manifest.presentation.logoPath, $manifest.presentation.formPath, $manifest.localeMetadata.'en-US'.resourcePath)) {
+    Assert-AdapterPackagePath $relative
+    $destination = Join-Path $packageRoot $relative
+    New-Item -ItemType Directory -Path (Split-Path $destination) -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('../package/' + $relative)) -Destination $destination
+}
 $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $packageRoot 'manifest.json') -Encoding utf8
-@{ displayName = $settings.label } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $packageRoot 'locales/en-US.json') -Encoding utf8
 $packagePath = Join-Path $root "$($manifest.adapterId)-$version.mpadapter"
 $stream = [IO.File]::Open($packagePath, [IO.FileMode]::CreateNew)
 $archive = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Create)

@@ -1,0 +1,13 @@
+{
+  "adapter.title": "SFTP",
+  "adapter.description": "Sync files from a verified SFTP server.",
+  "adapter.setup": "SFTP connection",
+  "adapter.instructions": "Enter the SFTP folder URL and the server’s SHA-256 host key fingerprint obtained from its administrator.",
+  "field.endpoint": "SFTP folder URL",
+  "field.username": "Username",
+  "field.password": "Password",
+  "field.trustedHostKeySha256": "SSH host key fingerprint (SHA256)",
+  "field.mutationPolicy": "Storage access",
+  "mutation.optimistic": "Read and write (optimistic)",
+  "mutation.readOnly": "Read only"
+}

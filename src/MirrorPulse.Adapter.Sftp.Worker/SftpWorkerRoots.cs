@@ -44,7 +44,8 @@ internal sealed class SftpWorkerRoots : IDisposable
 
     public static async Task<SftpWorkerRoots> CreateAsync(AdapterReady ready, AdapterControlChannel channel, CancellationToken token)
     {
-        if (ready.Roots.Count is < 1 or > 64) throw new InvalidDataException("InvalidRoots");
+        if (ready.Roots.Count is < 1 or > 64 || (ready.CredentialBindings is not null && ready.Roots.Count != 1))
+            throw new InvalidDataException("InvalidRoots");
         var roots = new SftpWorkerRoots();
         try
         {
@@ -53,11 +54,19 @@ internal sealed class SftpWorkerRoots : IDisposable
                 if (!binding.Enabled) { roots._roots.Add(binding.RootKey, null); continue; }
                 string mutationPolicy = binding.Configuration.GetValueOrDefault("mutationPolicy") ?? "Optimistic";
                 if (mutationPolicy is not ("Optimistic" or "ReadOnly")) throw new InvalidDataException("InvalidMutationPolicy");
+                string? credentialReference = ready.CredentialBindings is null
+                    ? binding.Configuration.GetValueOrDefault("credentialReference")
+                    : ready.CredentialBindings.GetValueOrDefault("password");
+                if (string.IsNullOrWhiteSpace(credentialReference)) throw new InvalidDataException("CredentialRequired");
+                string? hostKeyPin = binding.Configuration.GetValueOrDefault("trustedHostKeySha256")?.Trim();
+                if (hostKeyPin?.StartsWith("SHA256:", StringComparison.Ordinal) == true) hostKeyPin = hostKeyPin[7..];
+                if (ready.CredentialBindings is not null && string.IsNullOrEmpty(hostKeyPin))
+                    throw new InvalidDataException("HostKeyRequired");
                 var configuration = new SftpWorkerConfiguration(
                     new Uri(binding.Configuration.GetValueOrDefault("endpoint") ?? throw new InvalidDataException("EndpointRequired")),
                     binding.Configuration.GetValueOrDefault("username") ?? throw new InvalidDataException("UsernameRequired"),
-                    binding.Configuration.GetValueOrDefault("credentialReference") ?? throw new InvalidDataException("CredentialRequired"),
-                    binding.Configuration.GetValueOrDefault("trustedHostKeySha256"));
+                    credentialReference,
+                    hostKeyPin);
                 configuration.Validate();
                 Guid request = Guid.NewGuid();
                 await channel.SendAsync("CredentialRequest", request, false,
